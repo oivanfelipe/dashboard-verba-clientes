@@ -19,6 +19,8 @@ const estado = {
   serie: [],
   campanhas: [],
   sinais: {},
+  historico: [],
+  historicoCarteira: [],
   aba: 'global',
   clienteSel: null,
   investCliente: null, // null = carteira inteira na aba Investimentos
@@ -48,12 +50,14 @@ async function carregar() {
     Object.assign(estado, d);
     return;
   }
-  const [contas, clientes, serie, campanhas, sinais, sync] = await Promise.all([
+  const [contas, clientes, serie, campanhas, sinais, historico, histCarteira, sync] = await Promise.all([
     buscar('inv_account_status'),
     buscar('inv_client_overview'),
     buscar('inv_spend_series', '&order=data.asc'),
     buscar('inv_campanhas_resumo', '&order=gasto_30d.desc').catch(() => []),
     buscar('inv_sinal_saldo').catch(() => []),
+    buscar('inv_historico_mensal', '&order=mes.asc').catch(() => []),
+    buscar('inv_historico_carteira', '&order=mes.asc').catch(() => []),
     buscar('inv_sync_status').catch(() => []),
   ]);
   estado.contas = contas;
@@ -61,6 +65,8 @@ async function carregar() {
   estado.serie = serie;
   estado.campanhas = campanhas;
   estado.sinais = Object.fromEntries(sinais.map((s) => [s.account_id, s]));
+  estado.historico = historico;
+  estado.historicoCarteira = histCarteira;
   estado.ultimoSync = sync?.[0]?.ultimo_sync_ok ?? null;
 }
 
@@ -449,6 +455,199 @@ function renderInvestimentos() {
     </section>`;
 }
 
+
+/* =========================================================
+   Histórico — evolução do investimento mês a mês
+   O banco guarda o dado bruto para sempre; esta aba é a leitura
+   acumulada dele. Métricas derivadas (CPM, CPC, CTR, CPA, ROAS) vêm
+   calculadas do SQL sobre as somas — nunca são média de médias.
+   ========================================================= */
+
+const mesRotulo = (iso) => {
+  const [a, m] = String(iso).slice(0, 7).split('-');
+  const nomes = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+  return `${nomes[Number(m) - 1]}/${a.slice(2)}`;
+};
+
+const numero = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || v === null) return '—';
+  return n.toLocaleString('pt-BR');
+};
+
+function renderHistorico() {
+  const meses = estado.historicoCarteira;
+  if (!meses.length) {
+    return `<div class="vazio">
+      <b>Histórico ainda vazio</b>
+      Ele se preenche a cada sincronização — o banco nunca apaga o que já entrou.
+    </div>`;
+  }
+
+  const total = meses.reduce((s, m) => s + Number(m.investimento || 0), 0);
+  const atual = meses[meses.length - 1];
+  const anterior = meses.length > 1 ? meses[meses.length - 2] : null;
+  const varPct = anterior && Number(anterior.investimento) > 0
+    ? ((Number(atual.investimento) / Number(anterior.investimento)) - 1) * 100
+    : null;
+
+  // O SQL marca como parcial tanto o mês corrente quanto o primeiro da
+  // série, que começou no meio do mês. Comparar um parcial com um fechado
+  // exagera a queda, então o rótulo precisa avisar.
+  const mesCorrente = atual.parcial === true;
+
+  const kpis = `
+    <div class="kpis">
+      <div class="kpi">
+        <div class="kpi-rotulo">Investimento acumulado</div>
+        <div class="kpi-valor">${brl(total)}</div>
+        <div class="kpi-nota">${meses.length} ${meses.length === 1 ? 'mês' : 'meses'} de histórico</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-rotulo">${mesRotulo(atual.mes)}</div>
+        <div class="kpi-valor">${brl(atual.investimento)}</div>
+        <div class="kpi-nota">${mesCorrente ? 'mês incompleto' : 'mês fechado'}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-rotulo">Contra o mês anterior</div>
+        <div class="kpi-valor">${varPct === null ? '—' : `${varPct > 0 ? '+' : ''}${varPct.toFixed(0)}%`}</div>
+        <div class="kpi-nota">${mesCorrente ? 'mês parcial, tende a subir' : 'meses fechados'}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-rotulo">Clientes no mês</div>
+        <div class="kpi-valor">${atual.clientes ?? '—'}</div>
+        <div class="kpi-nota">${atual.contas ?? 0} contas com veiculação</div>
+      </div>
+    </div>`;
+
+  // ---- Barras: investimento por mês ----
+  const W = 1000, H = 220, mL = 70, mR = 16, mT = 14, mB = 30;
+  const iw = W - mL - mR, ih = H - mT - mB;
+  const maxV = Math.max(...meses.map((m) => Number(m.investimento))) || 1;
+  const teto = maxV * 1.15;
+  const passo = iw / meses.length;
+  const larg = Math.min(72, passo * 0.6);
+
+  const grade = [0, .5, 1].map((f) => {
+    const y = mT + ih - f * ih;
+    return `<line class="gr-grid" x1="${mL}" y1="${y}" x2="${W - mR}" y2="${y}"/>
+            <text class="gr-eixo" x="${mL - 8}" y="${y + 4}" text-anchor="end">${brl(teto * f)}</text>`;
+  }).join('');
+
+  const barras = meses.map((m, i) => {
+    const v = Number(m.investimento);
+    const h = (v / teto) * ih;
+    const x = mL + passo * i + (passo - larg) / 2;
+    const y = mT + ih - h;
+    const parcial = m.parcial === true;
+    return `
+      <rect x="${x}" y="${y}" width="${larg}" height="${Math.max(h, 2)}" rx="4"
+            fill="${parcial ? 'var(--linha-forte)' : 'var(--marca)'}">
+        <title>${mesRotulo(m.mes)}: ${brl(v)}${parcial ? ' (mês incompleto)' : ''}</title>
+      </rect>
+      <text class="gr-eixo" x="${x + larg / 2}" y="${y - 6}" text-anchor="middle"
+            style="font-weight:600">${brl(v)}</text>
+      <text class="gr-eixo" x="${x + larg / 2}" y="${H - 10}" text-anchor="middle">${mesRotulo(m.mes)}</text>`;
+  }).join('');
+
+  const grafico = `
+    <section class="bloco">
+      <div class="bloco-cabeca">
+        <h2>Investimento da carteira por mês</h2>
+        <span class="bloco-nota">barra cinza = mês incompleto, não comparável</span>
+      </div>
+      <div class="gr-caixa">
+        <svg class="grafico" viewBox="0 0 ${W} ${H}" role="img"
+             aria-label="Investimento mensal da carteira">${grade}${barras}</svg>
+      </div>
+    </section>`;
+
+  // ---- Pivô cliente × mês ----
+  const chaves = meses.map((m) => String(m.mes).slice(0, 10));
+  const porCliente = new Map();
+  for (const l of estado.historico) {
+    if (!porCliente.has(l.cliente)) porCliente.set(l.cliente, { cliente: l.cliente, meses: {}, total: 0 });
+    const alvo = porCliente.get(l.cliente);
+    const k = String(l.mes).slice(0, 10);
+    alvo.meses[k] = (alvo.meses[k] || 0) + Number(l.investimento || 0);
+    alvo.total += Number(l.investimento || 0);
+  }
+
+  const linhasPivot = [...porCliente.values()]
+    .sort((a, b) => b.total - a.total)
+    .map((c) => `
+      <tr>
+        <td class="cel-cliente">${esc(c.cliente)}</td>
+        ${chaves.map((k) => `<td class="num">${c.meses[k] ? brl(c.meses[k]) : '<span class="cel-sub">—</span>'}</td>`).join('')}
+        <td class="num" style="font-weight:650">${brl(c.total)}</td>
+      </tr>`).join('');
+
+  const pivot = `
+    <section class="bloco">
+      <div class="bloco-cabeca">
+        <h2>Investimento por cliente</h2>
+        <span class="bloco-nota">Meta e Google somados · ordenado pelo acumulado</span>
+      </div>
+      <div class="tabela-caixa">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Cliente</th>
+              ${chaves.map((k) => `<th scope="col" class="num">${mesRotulo(k)}</th>`).join('')}
+              <th scope="col" class="num">Acumulado</th>
+            </tr>
+          </thead>
+          <tbody>${linhasPivot}</tbody>
+        </table>
+      </div>
+    </section>`;
+
+  // ---- Performance do mês mais recente ----
+  const doMes = estado.historico.filter((l) => String(l.mes).slice(0, 10) === chaves[chaves.length - 1]);
+  const perf = doMes.length ? `
+    <section class="bloco">
+      <div class="bloco-cabeca">
+        <h2>Performance em ${mesRotulo(chaves[chaves.length - 1])}</h2>
+        <span class="bloco-nota">o conector do Meta não expõe conversões — por isso aparecem só no Google</span>
+      </div>
+      <div class="tabela-caixa">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Cliente</th>
+              <th scope="col">Plataforma</th>
+              <th scope="col" class="num">Investimento</th>
+              <th scope="col" class="num">Impressões</th>
+              <th scope="col" class="num">Cliques</th>
+              <th scope="col" class="num">CTR</th>
+              <th scope="col" class="num">CPC</th>
+              <th scope="col" class="num">CPM</th>
+              <th scope="col" class="num">Conversões</th>
+              <th scope="col" class="num">CPA</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${doMes.sort((a, b) => Number(b.investimento) - Number(a.investimento)).map((l) => `
+              <tr>
+                <td class="cel-cliente">${esc(l.cliente)}</td>
+                <td>${plat(l.platform)}</td>
+                <td class="num">${brl(l.investimento)}</td>
+                <td class="num">${numero(l.impressoes)}</td>
+                <td class="num">${numero(l.cliques)}</td>
+                <td class="num">${Number.isFinite(Number(l.ctr)) ? `${l.ctr}%` : '—'}</td>
+                <td class="num">${Number.isFinite(Number(l.cpc)) ? brl(l.cpc, { centavos: true }) : '—'}</td>
+                <td class="num">${Number.isFinite(Number(l.cpm)) ? brl(l.cpm, { centavos: true }) : '—'}</td>
+                <td class="num">${l.conversoes ? numero(Math.round(l.conversoes)) : '<span class="cel-sub">—</span>'}</td>
+                <td class="num">${Number.isFinite(Number(l.cpa)) ? brl(l.cpa) : '<span class="cel-sub">—</span>'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </section>` : '';
+
+  return `${kpis}${grafico}${pivot}${perf}`;
+}
+
 /* =========================================================
    Gráfico de linha — gasto diário por plataforma
    ========================================================= */
@@ -573,6 +772,7 @@ function render() {
   const alvo = document.getElementById('conteudo');
   alvo.innerHTML = estado.aba === 'global' ? renderGlobal()
     : estado.aba === 'cliente' ? renderCliente()
+    : estado.aba === 'historico' ? renderHistorico()
     : renderInvestimentos();
 
   document.getElementById('sync-info').textContent = MODO_DEMO
@@ -742,7 +942,38 @@ function gerarDemo() {
     };
   }
 
-  return { contas, clientes, serie, campanhas, sinais, ultimoSync: new Date().toISOString() };
+  // Histórico fictício: 4 meses, o primeiro e o último parciais.
+  const historico = [], historicoCarteira = [];
+  for (let k = 3; k >= 0; k--) {
+    const d = new Date(); d.setMonth(d.getMonth() - k, 1);
+    const mes = d.toISOString().slice(0, 10);
+    const fator = k === 0 ? 0.45 : k === 3 ? 0.4 : 0.9 + Math.random() * 0.25;
+    let invMes = 0, impMes = 0, cliMes = 0, cvMes = 0;
+    for (const c of contas) {
+      const inv = Math.round(c.burn_projecao * 30 * fator);
+      const imp = Math.round(inv * 47), cli = Math.round(imp * 0.027);
+      const cv = c.platform === 'google' ? Math.round(cli * 0.035) : null;
+      invMes += inv; impMes += imp; cliMes += cli; cvMes += cv || 0;
+      historico.push({
+        client_id: c.client_id, cliente: c.cliente, cliente_slug: c.cliente_slug,
+        platform: c.platform, mes, investimento: inv, impressoes: imp, cliques: cli,
+        conversoes: cv, valor_conversao: cv ? cv * 320 : null,
+        cpm: imp > 0 ? Math.round((inv / imp) * 1000 * 100) / 100 : null,
+        cpc: cli > 0 ? Math.round((inv / cli) * 100) / 100 : null,
+        ctr: imp > 0 ? Math.round((cli / imp) * 10000) / 100 : null,
+        cpa: cv ? Math.round((inv / cv) * 100) / 100 : null,
+        roas: cv ? 3.2 : null,
+      });
+    }
+    historicoCarteira.push({
+      mes, investimento: invMes, impressoes: impMes, cliques: cliMes,
+      conversoes: cvMes, clientes: 8, contas: contas.length,
+      parcial: k === 0 || k === 3,
+    });
+  }
+
+  return { contas, clientes, serie, campanhas, sinais, historico, historicoCarteira,
+           ultimoSync: new Date().toISOString() };
 }
 
 iniciar();

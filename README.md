@@ -10,9 +10,27 @@ Três visões:
 | **Carteira** | quem precisa de aporte agora | cadastro + ledger de aportes cruzado com gasto real |
 | **Por cliente** | como está esse cliente específico | idem, recortado por cliente |
 | **Investimentos** | onde o dinheiro está sendo aplicado, campanha a campanha | direto da plataforma de anúncio, via Windsor |
+| **Histórico** | quanto foi investido mês a mês, e o que rendeu | o acumulado que o banco guarda desde o primeiro sync |
 
 A aba Investimentos abre pela navegação (carteira inteira) ou pelo botão
 **Ver investimento completo** dentro de cada cliente, que a abre já filtrada nele.
+
+### Histórico e métricas
+
+O banco nunca apaga o que entrou: cada sync faz upsert sobre a janela recente e
+o acumulado cresce. `inv_historico_mensal` e `inv_historico_carteira` leem esse
+acumulado sem teto de janela.
+
+Guardamos só contadores brutos — impressões, cliques, conversões, valor. CPM,
+CPC, CTR, CPA e ROAS saem calculados na leitura, a partir das somas. Média de
+médias mente: a soma dos gastos dividida pela soma dos cliques é o CPC real do
+período; a média dos CPCs diários não é.
+
+Mês parcial vem marcado (`parcial`) e aparece em cinza no gráfico — tanto o mês
+corrente quanto o primeiro da série, que começou no meio do mês.
+
+**Conversões só existem no Google.** O conector do Meta não as expõe por nome
+direto, apenas via breakdown de `actions`. A interface mostra "—", nunca zero.
 
 ---
 
