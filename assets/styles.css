@@ -1,0 +1,240 @@
+/* =========================================================
+   Dashboard de verba — identidade V4 / Carvalho & Co
+   Peça de conteúdo: fundo branco, tinta preta, vermelho de acento.
+   Cores de status validadas em contraste WCAG AA sobre seus tints.
+   ========================================================= */
+
+:root {
+  --superficie: #ffffff;
+  --superficie-2: #f7f7f5;
+  --linha: #e4e4e0;
+  --linha-forte: #cfcfc9;
+
+  --tinta: #111111;
+  --tinta-2: #4a4a4a;
+  --tinta-3: #6b6b6b;
+
+  --marca: #c00000;
+
+  --ok: #176b3f;
+  --ok-tint: #e8f5ee;
+  --atencao: #9a5c00;
+  --atencao-tint: #fff4e0;
+  --critico: #c00000;
+  --critico-tint: #fdecec;
+  --neutro: #4a4a4a;
+  --neutro-tint: #f0f0ee;
+  --inativo: #6b6b6b;
+  --inativo-tint: #f5f5f3;
+
+  /* Séries — par validado (ΔE protan 23,2). Só marcas, nunca texto. */
+  --serie-meta: #1f5fa8;
+  --serie-google: #c4620a;
+
+  --raio: 6px;
+  --sombra: 0 1px 2px rgba(17, 17, 17, .06), 0 1px 8px rgba(17, 17, 17, .04);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--superficie);
+  color: var(--tinta);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 24px 72px; }
+
+/* ---------- Cabeçalho ---------- */
+
+header.topo {
+  border-bottom: 1px solid var(--linha);
+  margin-bottom: 28px;
+  background: var(--superficie);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.topo-inner {
+  max-width: 1240px; margin: 0 auto; padding: 18px 24px;
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+}
+.marca-bloco { display: flex; align-items: baseline; gap: 10px; }
+.marca-barra { width: 4px; height: 22px; background: var(--marca); border-radius: 2px; }
+h1 { font-size: 17px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+.subtitulo { font-size: 12.5px; color: var(--tinta-3); margin: 2px 0 0; }
+
+.topo-dir { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+
+.abas { display: flex; gap: 2px; background: var(--superficie-2); padding: 3px; border-radius: var(--raio); }
+.aba {
+  border: 0; background: transparent; font: inherit; font-size: 13px; font-weight: 550;
+  color: var(--tinta-3); padding: 6px 14px; border-radius: 4px; cursor: pointer;
+}
+.aba[aria-selected="true"] { background: var(--superficie); color: var(--tinta); box-shadow: var(--sombra); }
+.aba:focus-visible { outline: 2px solid var(--marca); outline-offset: 1px; }
+
+.sync-info { font-size: 12px; color: var(--tinta-3); white-space: nowrap; }
+
+/* ---------- Faixa de KPIs ---------- */
+
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
+.kpi {
+  border: 1px solid var(--linha); border-radius: var(--raio);
+  padding: 16px 18px; background: var(--superficie);
+}
+.kpi.destaque { border-color: var(--marca); border-width: 1.5px; }
+.kpi-rotulo { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--tinta-3); font-weight: 600; }
+.kpi-valor { font-size: 30px; font-weight: 640; letter-spacing: -.025em; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.kpi-valor.alerta { color: var(--marca); }
+.kpi-nota { font-size: 12px; color: var(--tinta-3); margin-top: 3px; }
+
+/* ---------- Blocos ---------- */
+
+section.bloco { margin-bottom: 34px; }
+.bloco-cabeca { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+h2 { font-size: 14px; font-weight: 650; margin: 0; letter-spacing: -.005em; }
+.bloco-nota { font-size: 12.5px; color: var(--tinta-3); }
+
+/* ---------- Tabela ---------- */
+
+.tabela-caixa { border: 1px solid var(--linha); border-radius: var(--raio); overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+thead th {
+  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--tinta-3); font-weight: 600; padding: 10px 14px;
+  border-bottom: 1px solid var(--linha); background: var(--superficie-2); white-space: nowrap;
+}
+thead th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody td { padding: 11px 14px; border-bottom: 1px solid var(--linha); vertical-align: middle; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr.clicavel { cursor: pointer; }
+tbody tr.clicavel:hover { background: var(--superficie-2); }
+.cel-cliente { font-weight: 560; }
+.cel-sub { font-size: 12px; color: var(--tinta-3); font-weight: 400; }
+
+/* ---------- Chip de situação ---------- */
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 100px;
+  white-space: nowrap;
+}
+.chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.chip-ok             { color: var(--ok);      background: var(--ok-tint); }
+.chip-atencao        { color: var(--atencao); background: var(--atencao-tint); }
+.chip-critico        { color: var(--critico); background: var(--critico-tint); }
+.chip-sem_verba      { color: #ffffff;        background: var(--marca); }
+.chip-sem_veiculacao { color: var(--neutro);  background: var(--neutro-tint); }
+.chip-inativo        { color: var(--inativo); background: var(--inativo-tint); }
+.chip-sem_dado       { color: var(--inativo); background: var(--inativo-tint); }
+
+/* ---------- Barra de dias restantes ---------- */
+
+.dias { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.dias-num { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 34px; text-align: right; }
+.dias-barra {
+  display: block; width: 62px; height: 6px; flex: none;
+  background: var(--linha); border-radius: 3px; overflow: hidden;
+}
+/* display:block é obrigatório — span inline ignora width/height. */
+.dias-fill { display: block; height: 100%; border-radius: 3px; }
+
+/* ---------- Plataforma ---------- */
+
+.plat { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.plat::before { content: ""; width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.plat-meta::before   { background: var(--serie-meta); }
+.plat-google::before { background: var(--serie-google); }
+
+/* ---------- Cartões de conta ---------- */
+
+.contas { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 14px; }
+.conta {
+  border: 1px solid var(--linha); border-radius: var(--raio); padding: 16px; background: var(--superficie);
+}
+.conta.urgente { border-color: var(--marca); border-width: 1.5px; }
+.conta-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.conta-nome { font-weight: 580; font-size: 13.5px; line-height: 1.3; }
+.conta-linha { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }
+.conta-linha dt { color: var(--tinta-3); }
+.conta-linha dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 550; }
+.conta-saldo { font-size: 22px; font-weight: 640; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.conta-saldo.zerado { color: var(--marca); }
+dl { margin: 0; }
+
+/* ---------- Gráfico ---------- */
+
+.gr-caixa { border: 1px solid var(--linha); border-radius: var(--raio); padding: 18px; }
+.gr-legenda { display: flex; gap: 18px; margin-bottom: 12px; font-size: 12.5px; color: var(--tinta-2); }
+.gr-legenda span { display: inline-flex; align-items: center; gap: 7px; }
+.gr-legenda i { width: 14px; height: 2.5px; border-radius: 2px; display: inline-block; }
+svg.grafico { width: 100%; height: auto; display: block; overflow: visible; }
+.gr-grid { stroke: var(--linha); stroke-width: 1; }
+.gr-eixo { fill: var(--tinta-3); font-size: 11px; }
+.gr-linha { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.gr-cursor { stroke: var(--linha-forte); stroke-width: 1; }
+.gr-ponto { stroke: var(--superficie); stroke-width: 2; }
+
+.tooltip {
+  position: fixed; pointer-events: none; z-index: 60;
+  background: var(--tinta); color: #fff; border-radius: 5px; padding: 8px 10px;
+  font-size: 12px; line-height: 1.5; white-space: nowrap; opacity: 0;
+  transition: opacity .1s; box-shadow: 0 3px 12px rgba(0,0,0,.2);
+}
+.tooltip.on { opacity: 1; }
+.tooltip b { font-variant-numeric: tabular-nums; }
+.tooltip .tt-serie { display: flex; align-items: center; gap: 6px; }
+.tooltip .tt-serie i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+/* ---------- Seletor de cliente ---------- */
+
+.seletor { display: flex; gap: 10px; align-items: center; margin-bottom: 22px; flex-wrap: wrap; }
+select, input[type="search"] {
+  font: inherit; font-size: 13.5px; padding: 7px 11px;
+  border: 1px solid var(--linha-forte); border-radius: var(--raio);
+  background: var(--superficie); color: var(--tinta); min-width: 240px;
+}
+select:focus-visible, input:focus-visible { outline: 2px solid var(--marca); outline-offset: 1px; }
+
+/* ---------- Estados ---------- */
+
+.vazio {
+  border: 1px dashed var(--linha-forte); border-radius: var(--raio);
+  padding: 40px 24px; text-align: center; color: var(--tinta-3); font-size: 13.5px;
+}
+.vazio b { color: var(--tinta); display: block; margin-bottom: 6px; font-size: 14.5px; }
+.vazio code {
+  background: var(--superficie-2); padding: 1px 5px; border-radius: 3px;
+  font-size: 12.5px; color: var(--tinta);
+}
+.erro { border-color: var(--marca); color: var(--marca); }
+
+.faixa-demo {
+  background: var(--atencao-tint); color: var(--atencao);
+  font-size: 12.5px; font-weight: 600; text-align: center; padding: 7px;
+}
+
+.oculto { display: none !important; }
+
+/* ---------- Responsivo ---------- */
+
+@media (max-width: 900px) {
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .wrap { padding: 0 14px 48px; }
+  .topo-inner { padding: 14px; }
+  .kpis { grid-template-columns: 1fr; }
+  .topo-dir { margin-left: 0; width: 100%; }
+  .kpi-valor { font-size: 26px; }
+}
+
+@media print {
+  .abas, .seletor { display: none; }
+  .kpi, .tabela-caixa, .gr-caixa, .conta { break-inside: avoid; }
+}
