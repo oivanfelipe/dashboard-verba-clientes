@@ -19,10 +19,14 @@ A aba Investimentos abre pela navegação (carteira inteira) ou pelo botão
 ## Como o dado chega aqui
 
 ```
-Windsor.ai  ──►  Edge Function sync-windsor  ──►  Supabase (dashboard-v4)  ──►  index.html na Vercel
- (gasto +                (1x/dia)                  (+ ledger de aportes)         (leitura pública
-  orçamento)                                                                      das views)
+Windsor.ai  ──►  inv_sync_windsor()  ──►  Supabase (dashboard-v4)  ──►  index.html na Vercel
+ (gasto +        pg_cron, 1x/dia às        (+ ledger de aportes)        (leitura pública
+  orçamento)     09:00 UTC / 06:00 BRT                                   das views)
 ```
+
+O sync roda **dentro do Postgres**, não numa Edge Function: `pg_cron` e a
+extensão `http` já resolvem, sem CLI e sem deploy. A chave do Windsor fica no
+Vault como `windsor_api_key` e nunca aparece em log.
 
 ### Por que existe o Supabase e o dado não vem direto do Windsor
 
@@ -83,8 +87,7 @@ assets/
   app.js                                acesso a dados e renderização
   styles.css                            identidade V4, paleta validada em contraste
 supabase/
-  migrations/0001_inv_schema.sql        schema completo (já aplicado)
-  functions/sync-windsor/index.ts       job diário Windsor → Postgres
+  migrations/                           schema, views e o job de sync
 vercel.json                             headers e cache
 ```
 
@@ -109,17 +112,30 @@ python3 -m http.server 8000
 
 ---
 
-## O que falta ligar
+## Ligando o sync
 
-1. **Chave do Windsor.** Conferir se os campos em `CONECTORES`
-   (`supabase/functions/sync-windsor/index.ts`) batem com o que `get_fields` devolve no
-   plano contratado — é o único ponto a ajustar. Hoje a conta Windsor está no plano
-   Free e só tem GA4 conectado; Meta Ads e Google Ads ainda precisam ser conectados.
-2. **Deploy da function** com `WINDSOR_API_KEY` no ambiente, e agendamento diário.
-3. **Cadastro.** Popular `inv_clients` e `inv_ad_accounts` com o `external_id` de cada
-   conta. Conta que aparece no Windsor sem cadastro é reportada no `inv_sync_log`, nunca
-   criada automaticamente — o vínculo conta ↔ cliente é decisão humana.
-4. **Lançamento dos aportes** em `inv_deposits`, com `ledger_inicio` na data de virada.
+A chave do Windsor precisa estar no Vault. Rodar uma vez, com a chave real:
+
+```sql
+select vault.create_secret('SUA_CHAVE', 'windsor_api_key', 'Windsor.ai API key');
+```
+
+Testar na hora:
+
+```sql
+select public.inv_sync_windsor(7);
+```
+
+O agendamento (`inv-sync-windsor`, diário às 09:00 UTC) já está criado. O histórico
+de execuções fica em `inv_sync_log` — `status`, `contas_ok`, `contas_erro` e o
+`detalhe` com o erro de cada conector.
+
+## O que falta
+
+**Lançamento dos aportes** em `inv_deposits`, com `ledger_inicio` na data de virada.
+Enquanto não houver aporte, as contas aparecem como *Aporte não lançado* e o saldo
+fica em branco — é o estado correto, não um erro. O sinal de entrega já responde
+"tem saldo ou não" sem depender disso.
 
 ---
 
