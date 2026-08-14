@@ -17,8 +17,10 @@ const estado = {
   contas: [],
   clientes: [],
   serie: [],
+  campanhas: [],
   aba: 'global',
   clienteSel: null,
+  investCliente: null, // null = carteira inteira na aba Investimentos
   ultimoSync: null,
 };
 
@@ -45,15 +47,17 @@ async function carregar() {
     Object.assign(estado, d);
     return;
   }
-  const [contas, clientes, serie, sync] = await Promise.all([
+  const [contas, clientes, serie, campanhas, sync] = await Promise.all([
     buscar('inv_account_status'),
     buscar('inv_client_overview'),
     buscar('inv_spend_series', '&order=data.asc'),
+    buscar('inv_campanhas_resumo', '&order=gasto_30d.desc').catch(() => []),
     buscar('inv_sync_status').catch(() => []),
   ]);
   estado.contas = contas;
   estado.clientes = clientes;
   estado.serie = serie;
+  estado.campanhas = campanhas;
   estado.ultimoSync = sync?.[0]?.ultimo_sync_ok ?? null;
 }
 
@@ -256,6 +260,10 @@ function renderCliente() {
     <div class="seletor">
       <label for="sel-cliente" class="bloco-nota">Cliente</label>
       <select id="sel-cliente">${opcoes}</select>
+      <button class="botao" id="ver-investimento">
+        Ver investimento completo
+        <span aria-hidden="true">→</span>
+      </button>
     </div>
     ${kpis}
     <section class="bloco">
@@ -263,6 +271,125 @@ function renderCliente() {
       <div class="contas">${cartoes}</div>
     </section>
     ${serie.length ? blocoGrafico(serie, 'Investimento diário') : ''}`;
+}
+
+/* =========================================================
+   Investimentos — visão completa vinda da plataforma de anúncio
+   As abas Carteira e Por cliente vivem de saldo e ledger.
+   Esta vive do detalhe por campanha que o Windsor traz.
+   ========================================================= */
+
+function renderInvestimentos() {
+  if (!estado.campanhas.length) {
+    return `<div class="vazio">
+      <b>Sem detalhe de campanha ainda</b>
+      Esta aba mostra o investimento campanha a campanha, direto da plataforma.
+      Ela se preenche quando o sync do Windsor rodar.
+    </div>`;
+  }
+
+  const todos = estado.campanhas;
+  const sel = estado.investCliente;
+  const linhas = sel ? todos.filter((c) => c.cliente_slug === sel) : todos;
+
+  const clientesUnicos = [...new Map(todos.map((c) => [c.cliente_slug, c.cliente])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'));
+
+  const soma = (f) => linhas.reduce((s, c) => s + Number(c[f] || 0), 0);
+  const ativas = linhas.filter((c) => ['ACTIVE', 'ENABLED'].includes(String(c.status).toUpperCase()));
+  const orcDia = ativas.reduce((s, c) => s + Number(c.orcamento || 0), 0);
+  const gasto7 = soma('gasto_7d');
+  const gasto30 = soma('gasto_30d');
+
+  // Quanto do orçamento configurado está realmente sendo entregue.
+  // Abaixo de 100% a campanha não gasta o que foi planejado — pode ser
+  // falta de saldo, de audiência ou de aprovação.
+  const entrega = orcDia > 0 ? (gasto7 / 7) / orcDia * 100 : null;
+
+  const filtro = `
+    <div class="seletor">
+      <label for="sel-invest" class="bloco-nota">Cliente</label>
+      <select id="sel-invest">
+        <option value=""${!sel ? ' selected' : ''}>Todos os clientes</option>
+        ${clientesUnicos.map(([slug, nome]) =>
+          `<option value="${esc(slug)}"${slug === sel ? ' selected' : ''}>${esc(nome)}</option>`).join('')}
+      </select>
+      ${sel ? `<button class="botao-secundario" id="limpar-invest">Ver todos</button>` : ''}
+    </div>`;
+
+  const kpis = `
+    <div class="kpis">
+      <div class="kpi">
+        <div class="kpi-rotulo">Investido em 30 dias</div>
+        <div class="kpi-valor">${brl(gasto30)}</div>
+        <div class="kpi-nota">${linhas.length} campanha${linhas.length === 1 ? '' : 's'}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-rotulo">Últimos 7 dias</div>
+        <div class="kpi-valor">${brl(gasto7)}</div>
+        <div class="kpi-nota">${brl(gasto7 / 7)} por dia</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-rotulo">Orçamento/dia configurado</div>
+        <div class="kpi-valor">${brl(orcDia)}</div>
+        <div class="kpi-nota">${ativas.length} campanha(s) ativa(s)</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-rotulo">Entrega do orçamento</div>
+        <div class="kpi-valor${entrega != null && entrega < 70 ? ' alerta' : ''}">${entrega != null ? `${entrega.toFixed(0)}%` : '—'}</div>
+        <div class="kpi-nota">gasto real sobre o planejado</div>
+      </div>
+    </div>`;
+
+  const corpo = [...linhas]
+    .sort((a, b) => Number(b.gasto_30d || 0) - Number(a.gasto_30d || 0))
+    .map((c) => {
+      const ativa = ['ACTIVE', 'ENABLED'].includes(String(c.status).toUpperCase());
+      const media = Number(c.media_dia_7d || 0);
+      const orc = Number(c.orcamento || 0);
+      const pct = orc > 0 ? media / orc * 100 : null;
+      return `
+      <tr>
+        <td>
+          <div class="cel-cliente">${esc(c.campanha)}</div>
+          <div class="cel-sub">${esc(c.cliente)} · ${esc(c.conta)}</div>
+        </td>
+        <td>${plat(c.platform)}</td>
+        <td><span class="chip chip-${ativa ? 'ok' : 'inativo'}">${ativa ? 'Ativa' : 'Pausada'}</span></td>
+        <td class="num">${orc > 0 ? brl(orc) : '<span class="cel-sub">no ad set</span>'}</td>
+        <td class="num">${brl(media)}</td>
+        <td class="num">${pct != null ? `${pct.toFixed(0)}%` : '—'}</td>
+        <td class="num">${brl(c.gasto_7d)}</td>
+        <td class="num">${brl(c.gasto_30d)}</td>
+      </tr>`;
+    }).join('');
+
+  return `
+    ${filtro}
+    ${kpis}
+    <section class="bloco">
+      <div class="bloco-cabeca">
+        <h2>Campanhas${sel ? ` — ${esc(clientesUnicos.find(([s]) => s === sel)?.[1] ?? '')}` : ''}</h2>
+        <span class="bloco-nota">direto da plataforma de anúncio · ordenadas por investimento</span>
+      </div>
+      <div class="tabela-caixa">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Campanha</th>
+              <th scope="col">Plataforma</th>
+              <th scope="col">Status</th>
+              <th scope="col" class="num">Orçamento/dia</th>
+              <th scope="col" class="num">Média/dia 7d</th>
+              <th scope="col" class="num">Entrega</th>
+              <th scope="col" class="num">Gasto 7d</th>
+              <th scope="col" class="num">Gasto 30d</th>
+            </tr>
+          </thead>
+          <tbody>${corpo}</tbody>
+        </table>
+      </div>
+    </section>`;
 }
 
 /* =========================================================
@@ -387,7 +514,9 @@ function erro(msg) {
 
 function render() {
   const alvo = document.getElementById('conteudo');
-  alvo.innerHTML = estado.aba === 'global' ? renderGlobal() : renderCliente();
+  alvo.innerHTML = estado.aba === 'global' ? renderGlobal()
+    : estado.aba === 'cliente' ? renderCliente()
+    : renderInvestimentos();
 
   document.getElementById('sync-info').textContent = MODO_DEMO
     ? 'dados fictícios'
@@ -397,6 +526,22 @@ function render() {
 
   const sel = document.getElementById('sel-cliente');
   if (sel) sel.addEventListener('change', (e) => { estado.clienteSel = e.target.value; render(); });
+
+  const selInv = document.getElementById('sel-invest');
+  if (selInv) selInv.addEventListener('change', (e) => {
+    estado.investCliente = e.target.value || null;
+    render();
+  });
+
+  const limpar = document.getElementById('limpar-invest');
+  if (limpar) limpar.addEventListener('click', () => { estado.investCliente = null; render(); });
+
+  // Botão do cliente que leva ao detalhe completo já filtrado nele.
+  const verInvest = document.getElementById('ver-investimento');
+  if (verInvest) verInvest.addEventListener('click', () => {
+    estado.investCliente = estado.clienteSel;
+    trocarAba('investimentos');
+  });
 
   alvo.querySelectorAll('tr.clicavel').forEach((tr) => {
     const abrir = () => {
@@ -500,7 +645,29 @@ function gerarDemo() {
     });
   }
 
-  return { contas, clientes, serie, ultimoSync: new Date().toISOString() };
+  // Detalhe por campanha, para a aba Investimentos.
+  const campanhas = [];
+  for (const c of contas) {
+    const qtd = c.campanhas_ativas || 1;
+    for (let i = 1; i <= qtd; i++) {
+      const orc = Math.round((c.burn_configurado / qtd) * 100) / 100;
+      const media = Math.round(orc * (0.55 + Math.random() * 0.55) * 100) / 100;
+      campanhas.push({
+        account_id: c.account_id, client_id: c.client_id,
+        cliente: c.cliente, cliente_slug: c.cliente_slug,
+        platform: c.platform, conta: c.conta,
+        campanha: `${c.platform === 'meta' ? '[Trafego]' : '[Search]'} ${c.conta} — v${i}`,
+        status: c.burn_configurado > 0 ? 'ACTIVE' : 'PAUSED',
+        orcamento: orc || null,
+        gasto_7d: Math.round(media * 7 * 100) / 100,
+        gasto_30d: Math.round(media * 30 * 100) / 100,
+        media_dia_7d: media,
+        ultimo_dia_com_gasto: new Date().toISOString().slice(0, 10),
+      });
+    }
+  }
+
+  return { contas, clientes, serie, campanhas, ultimoSync: new Date().toISOString() };
 }
 
 iniciar();

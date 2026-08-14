@@ -201,6 +201,25 @@ select, input[type="search"] {
 }
 select:focus-visible, input:focus-visible { outline: 2px solid var(--marca); outline-offset: 1px; }
 
+/* Texto sobre vermelho é sempre branco: preto sobre #C00000 dá 2,91:1 e reprova. */
+.botao {
+  display: inline-flex; align-items: center; gap: 7px;
+  font: inherit; font-size: 13px; font-weight: 600;
+  background: var(--marca); color: #fff; border: 0;
+  padding: 8px 15px; border-radius: var(--raio); cursor: pointer;
+}
+.botao:hover { background: #a30000; }
+.botao:focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
+
+.botao-secundario {
+  font: inherit; font-size: 13px; font-weight: 550;
+  background: var(--superficie); color: var(--tinta-2);
+  border: 1px solid var(--linha-forte); padding: 7px 13px;
+  border-radius: var(--raio); cursor: pointer;
+}
+.botao-secundario:hover { background: var(--superficie-2); }
+.botao-secundario:focus-visible { outline: 2px solid var(--marca); outline-offset: 1px; }
+
 /* ---------- Estados ---------- */
 
 .vazio {
