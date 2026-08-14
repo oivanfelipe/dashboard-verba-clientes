@@ -761,6 +761,16 @@ function blocoGrafico(serie, titulo) {
   if (pontos.length < 2) return '';
 
   const usadas = ['meta', 'google'].filter((p) => pontos.some((d) => d[p] > 0));
+  // Conta com histórico só de zeros (ex.: parada o período inteiro) não tem
+  // o que plotar. Sem este corte, Math.max(...[]) vira -Infinity e o eixo
+  // do gráfico mostra "—" em vez de valores — pior que não mostrar nada.
+  if (!usadas.length) {
+    return `
+      <section class="bloco">
+        <div class="bloco-cabeca"><h2>${esc(titulo)}</h2></div>
+        <div class="vazio">Nenhum investimento registrado nesse período.</div>
+      </section>`;
+  }
 
   const W = 1000, H = 260, mL = 58, mR = 16, mT = 12, mB = 28;
   const iw = W - mL - mR, ih = H - mT - mB;
