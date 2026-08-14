@@ -4,8 +4,10 @@
    ========================================================= */
 
 import {
-  SITUACOES, SINAIS, PLATAFORMAS, brl, dias, dataCurta, dataHora,
-  larguraDias, ordenarPorUrgencia, situacaoDe, burnProjecao, diasRestantes,
+  SITUACOES, PLATAFORMAS, brl, dias, dataCurta, dataHora,
+  larguraDias, situacaoDe, burnProjecao, diasRestantes,
+  STATUS_OPERACIONAL, statusOperacionalDe, ordenarPorStatusOperacional,
+  PERIODOS, faixaPeriodo,
 } from './calc.js';
 
 import { CONFIG } from './config.js';
@@ -19,11 +21,14 @@ const estado = {
   serie: [],
   campanhas: [],
   sinais: {},
+  statusCampanhas: {},
+  ultimoAporte: {},
   historico: [],
   historicoCarteira: [],
   aba: 'global',
   clienteSel: null,
   investCliente: null, // null = carteira inteira na aba Investimentos
+  periodo: '30d',
   ultimoSync: null,
 };
 
@@ -50,12 +55,15 @@ async function carregar() {
     Object.assign(estado, d);
     return;
   }
-  const [contas, clientes, serie, campanhas, sinais, historico, histCarteira, sync] = await Promise.all([
+  const [contas, clientes, serie, campanhas, sinais, statusCampanhas, ultimoAporte,
+         historico, histCarteira, sync] = await Promise.all([
     buscar('inv_account_status'),
     buscar('inv_client_overview'),
     buscar('inv_spend_series', '&order=data.asc'),
     buscar('inv_campanhas_resumo', '&order=gasto_30d.desc').catch(() => []),
     buscar('inv_sinal_saldo').catch(() => []),
+    buscar('inv_status_campanhas').catch(() => []),
+    buscar('inv_ultimo_aporte').catch(() => []),
     buscar('inv_historico_mensal', '&order=mes.asc').catch(() => []),
     buscar('inv_historico_carteira', '&order=mes.asc').catch(() => []),
     buscar('inv_sync_status').catch(() => []),
@@ -65,6 +73,8 @@ async function carregar() {
   estado.serie = serie;
   estado.campanhas = campanhas;
   estado.sinais = Object.fromEntries(sinais.map((s) => [s.account_id, s]));
+  estado.statusCampanhas = Object.fromEntries(statusCampanhas.map((s) => [s.account_id, s]));
+  estado.ultimoAporte = Object.fromEntries(ultimoAporte.map((a) => [a.account_id, a]));
   estado.historico = historico;
   estado.historicoCarteira = histCarteira;
   estado.ultimoSync = sync?.[0]?.ultimo_sync_ok ?? null;
@@ -78,80 +88,169 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
 
-const chip = (sit) =>
-  `<span class="chip chip-${esc(sit)}">${esc(SITUACOES[sit]?.rotulo ?? sit)}</span>`;
+// Cor da barra segue o mesmo status operacional exibido na coluna Status —
+// um único vocabulário, não dois cruzados.
+const corPorTom = (tom) => ({
+  critico: 'var(--critico)', atencao: 'var(--atencao)', ok: 'var(--ok)',
+}[tom] ?? 'var(--linha-forte)');
 
-const corSituacao = (sit) => ({
-  ok: 'var(--ok)', atencao: 'var(--atencao)', critico: 'var(--critico)',
-  sem_verba: 'var(--marca)',
-}[sit] ?? 'var(--linha-forte)');
-
-const barraDias = (d, sit) => `
+const barraDias = (d, statusOp) => `
   <div class="dias">
     <span class="dias-num">${d ?? '—'}</span>
     <span class="dias-barra" role="img" aria-label="${esc(dias(d))} restantes">
-      <span class="dias-fill" style="width:${larguraDias(d)}%;background:${corSituacao(sit)}"></span>
+      <span class="dias-fill" style="width:${larguraDias(d)}%;background:${corPorTom(STATUS_OPERACIONAL[statusOp]?.chip)}"></span>
     </span>
   </div>`;
 
 const plat = (p) =>
   `<span class="plat plat-${esc(p)}">${esc(PLATAFORMAS[p]?.rotulo ?? p)}</span>`;
 
-const chipSinal = (accountId) => {
-  const s = estado.sinais[accountId];
-  const def = s && SINAIS[s.sinal];
+/* ---------- Status operacional: UM status por conta ----------
+   Substitui a antiga combinação de "situação" (ledger) + "sinal de
+   entrega" (inferência) + "campanhas ativas" como colunas separadas.
+   Ver calc.js:statusOperacionalDe para a ordem de prioridade. */
+
+function calcularStatusOp(conta) {
+  const sc = estado.statusCampanhas[conta.account_id];
+  const sinal = estado.sinais[conta.account_id]?.sinal;
+  return statusOperacionalDe({
+    ativo: conta.ativo,
+    campanhasTotal: sc ? sc.campanhas_total : null,
+    campanhasAtivasHoje: sc ? sc.campanhas_ativas_hoje : null,
+    diasSemDadoNovo: sc ? sc.dias_sem_dado_novo : null,
+    sinal,
+  });
+}
+
+function motivoStatusOp(conta, key) {
+  const sc = estado.statusCampanhas[conta.account_id];
+  const sinal = estado.sinais[conta.account_id];
+  switch (key) {
+    case 'parada':
+      return `${sc?.campanhas_total ?? '?'} campanha(s) cadastrada(s), nenhuma ativa em ${dataCurta(sc?.ultimo_dado)}`;
+    case 'sem_sync':
+      return `o Windsor não traz dado novo desta conta há ${sc?.dias_sem_dado_novo} dias (última vez em ${dataCurta(sc?.ultimo_dado)})`;
+    case 'sem_saldo':
+      return `entregou em média ${sinal?.entrega_media_pct}% do orçamento nos últimos 7 dias`;
+    case 'saldo_apertado':
+      return `entregou em média ${sinal?.entrega_media_pct}% do orçamento — vale acompanhar`;
+    case 'parcial':
+      return `${sc?.campanhas_ativas_hoje} de ${sc?.campanhas_total} campanhas ativas`;
+    case 'sem_campanha':
+      return 'nenhuma campanha apareceu no relatório ainda';
+    case 'inativa':
+      return 'conta marcada como inativa no cadastro';
+    default:
+      return `${sc?.campanhas_ativas_hoje ?? 0} campanha(s) ativa(s), entregando dentro do esperado`;
+  }
+}
+
+const chipStatusOp = (conta) => {
+  const key = conta.statusOp ?? calcularStatusOp(conta);
+  const def = STATUS_OPERACIONAL[key];
   if (!def) return '<span class="cel-sub">—</span>';
-  return `<span class="chip chip-${def.chip}" title="entregou em média ${s.entrega_media_pct}% do orçamento nos últimos 7 dias">${esc(def.rotulo)}</span>`;
+  return `<span class="chip chip-${def.chip}" title="${esc(motivoStatusOp(conta, key))}">${esc(def.rotulo)}</span>`;
 };
+
+/* ---------- Investimento por período (filtro da Carteira) ---------- */
+
+function mapaInvestimentoPeriodo(periodo) {
+  const { inicio, fim } = faixaPeriodo(periodo);
+  const mapa = new Map();
+  for (const s of estado.serie) {
+    if (s.data < inicio || s.data > fim) continue;
+    mapa.set(s.account_id, (mapa.get(s.account_id) || 0) + Number(s.spend || 0));
+  }
+  return mapa;
+}
 
 /* =========================================================
    Visão global
    ========================================================= */
 
 function renderGlobal() {
-  const ativas = estado.contas.filter((c) => c.ativo);
+  // Um status por conta, calculado uma vez e carregado na própria linha —
+  // evita recalcular em cada função de apoio (ordenar, filtrar, exibir).
+  const contas = estado.contas.map((c) => ({ ...c, statusOp: calcularStatusOp(c) }));
+  const ativas = contas.filter((c) => c.ativo);
 
-  const semVerba = ativas.filter((c) => c.situacao === 'sem_verba');
-  const criticas = ativas.filter((c) => ['critico', 'sem_verba'].includes(c.situacao));
-  // Conta sem aporte lançado não entra no saldo: somar zero ali daria um
-  // total falso e faria a carteira parecer mais pobre do que é.
-  const comLedger = ativas.filter((c) => c.tem_aporte);
-  const semLedger = ativas.filter((c) => c.situacao === 'sem_ledger');
-  const saldoTotal = comLedger.reduce((s, c) => s + Number(c.saldo || 0), 0);
-  const burnTotal = ativas.reduce((s, c) => s + Number(c.burn_projecao || 0), 0);
-  const clientesSemVerba = new Set(semVerba.map((c) => c.cliente)).size;
+  const investPorConta = mapaInvestimentoPeriodo(estado.periodo);
+  const investTotalPeriodo = ativas.reduce((s, c) => s + (investPorConta.get(c.account_id) || 0), 0);
+
+  // Ação necessária agora: a conta parou ou está prestes a parar.
+  const urgentes = ativas.filter((c) => ['parada', 'sem_sync', 'sem_saldo'].includes(c.statusOp));
+  const emObservacao = ativas.filter((c) => c.statusOp === 'saldo_apertado');
+  const rodando = ativas.filter((c) => ['investindo', 'parcial'].includes(c.statusOp));
+  const clientesUrgentes = new Set(urgentes.map((c) => c.cliente)).size;
+
+  const seletorPeriodo = `
+    <div class="seletor-periodo">
+      <label for="sel-periodo">Investimento no período</label>
+      <select id="sel-periodo">
+        ${Object.entries(PERIODOS).map(([k, v]) =>
+          `<option value="${k}"${k === estado.periodo ? ' selected' : ''}>${esc(v.rotulo)}</option>`).join('')}
+      </select>
+    </div>`;
 
   const kpis = `
     <div class="kpis">
-      <div class="kpi${semVerba.length ? ' destaque' : ''}">
-        <div class="kpi-rotulo">Contas sem verba</div>
-        <div class="kpi-valor${semVerba.length ? ' alerta' : ''}">${semVerba.length}</div>
-        <div class="kpi-nota">${clientesSemVerba} cliente${clientesSemVerba === 1 ? '' : 's'} afetado${clientesSemVerba === 1 ? '' : 's'}</div>
+      <div class="kpi${urgentes.length ? ' destaque' : ''}">
+        <div class="kpi-rotulo">Contas em risco agora</div>
+        <div class="kpi-valor${urgentes.length ? ' alerta' : ''}">${urgentes.length}</div>
+        <div class="kpi-nota">${clientesUrgentes} cliente${clientesUrgentes === 1 ? '' : 's'} afetado${clientesUrgentes === 1 ? '' : 's'}</div>
       </div>
       <div class="kpi">
-        <div class="kpi-rotulo">Saldo em conta</div>
-        <div class="kpi-valor">${comLedger.length ? brl(saldoTotal) : '—'}</div>
-        <div class="kpi-nota">${semLedger.length
-          ? `${semLedger.length} de ${ativas.length} contas sem aporte lançado`
-          : `${ativas.length} contas ativas`}</div>
+        <div class="kpi-rotulo">Investido — ${esc(PERIODOS[estado.periodo].rotulo)}</div>
+        <div class="kpi-valor">${brl(investTotalPeriodo)}</div>
+        <div class="kpi-nota">${ativas.length} contas ativas</div>
       </div>
       <div class="kpi">
-        <div class="kpi-rotulo">Queima por dia</div>
-        <div class="kpi-valor">${brl(burnTotal)}</div>
-        <div class="kpi-nota">${burnTotal > 0
-          ? (comLedger.length
-              ? `carteira dura ~${Math.floor(saldoTotal / burnTotal)} dias`
-              : 'lance os aportes para projetar a duração')
-          : 'nenhuma campanha ativa'}</div>
+        <div class="kpi-rotulo">Contas investindo agora</div>
+        <div class="kpi-valor">${rodando.length}<span style="font-size:16px;color:var(--tinta-3)"> de ${ativas.length}</span></div>
+        <div class="kpi-nota">${ativas.length - rodando.length} sem campanha rodando</div>
       </div>
-      <div class="kpi${criticas.length ? ' destaque' : ''}">
-        <div class="kpi-rotulo">Precisa de aporte</div>
-        <div class="kpi-valor${criticas.length ? ' alerta' : ''}">${criticas.length}</div>
-        <div class="kpi-nota">sem verba ou menos de 3 dias</div>
+      <div class="kpi${emObservacao.length ? ' destaque' : ''}">
+        <div class="kpi-rotulo">Saldo apertado</div>
+        <div class="kpi-valor">${emObservacao.length}</div>
+        <div class="kpi-nota">tende a virar risco nos próximos dias</div>
       </div>
     </div>`;
 
-  const linhas = ordenarPorUrgencia(estado.contas)
+  const listaUrgente = (lista, titulo, tag, nota) => !lista.length ? '' : `
+    <div class="alerta-grupo">
+      <div class="alerta-cabeca">
+        <span class="alerta-tag alerta-tag-${tag}">${esc(titulo)}</span>
+        <span class="bloco-nota">${esc(nota)}</span>
+      </div>
+      <ul class="alerta-lista">
+        ${lista.map((c) => `
+          <li class="clicavel" data-cliente="${esc(c.cliente_slug)}" tabindex="0">
+            <strong>${esc(c.cliente)}</strong> · ${esc(c.conta)} ${plat(c.platform)}
+            <br><span class="cel-sub">${esc(motivoStatusOp(c, c.statusOp))}</span>
+          </li>`).join('')}
+      </ul>
+    </div>`;
+
+  const alerta = (urgentes.length || emObservacao.length) ? `
+    <section class="bloco">
+      <div class="alerta-saldo">
+        ${listaUrgente(
+          ordenarPorStatusOperacional(urgentes), 'Agir agora', 'critico',
+          'parada, sem sincronizar ou provável sem saldo — clique para abrir o cliente',
+        )}
+        ${listaUrgente(
+          ordenarPorStatusOperacional(emObservacao), 'Fique de olho', 'atencao',
+          'entrega abaixo do orçamento nos últimos dias',
+        )}
+        <p class="alerta-rodape">
+          "Provável sem saldo" e "Saldo apertado" são inferidos pela entrega das campanhas, não
+          confirmados pela plataforma — também podem ser anúncio reprovado, público esgotado ou
+          pausa manual. "Parada" e "Sem dado recente" são fatos: vêm direto do status da campanha.
+        </p>
+      </div>
+    </section>` : '';
+
+  const linhas = ordenarPorStatusOperacional(contas)
     .map((c) => `
       <tr class="clicavel" data-cliente="${esc(c.cliente_slug)}" tabindex="0">
         <td>
@@ -159,16 +258,14 @@ function renderGlobal() {
           <div class="cel-sub">${esc(c.conta)}</div>
         </td>
         <td>${plat(c.platform)}</td>
-        <td>${chip(c.situacao)}</td>
+        <td>${chipStatusOp(c)}</td>
         <td class="num">${c.tem_aporte ? brl(c.saldo) : '<span class="cel-sub">—</span>'}</td>
-        <td>${chipSinal(c.account_id)}</td>
-        <td class="num">${brl(c.burn_projecao)}</td>
-        <td class="num">${barraDias(c.dias_restantes, c.situacao)}</td>
-        <td class="num">${brl(c.gasto_mes_atual)}</td>
+        <td class="num">${brl(investPorConta.get(c.account_id) || 0)}</td>
+        <td class="num">${barraDias(c.dias_restantes, c.statusOp)}</td>
         <td class="cel-sub">${esc(c.gestor ?? '—')}</td>
       </tr>`).join('');
 
-  const tabela = estado.contas.length ? `
+  const tabela = contas.length ? `
     <div class="tabela-caixa">
       <table>
         <caption class="oculto">Contas de anúncio ordenadas por urgência</caption>
@@ -176,12 +273,10 @@ function renderGlobal() {
           <tr>
             <th scope="col">Cliente / conta</th>
             <th scope="col">Plataforma</th>
-            <th scope="col">Situação</th>
+            <th scope="col">Status</th>
             <th scope="col" class="num">Saldo</th>
-            <th scope="col">Sinal de entrega</th>
-            <th scope="col" class="num">Queima/dia</th>
+            <th scope="col" class="num">Investido — ${esc(PERIODOS[estado.periodo].rotulo)}</th>
             <th scope="col" class="num">Dias restantes</th>
-            <th scope="col" class="num">Gasto no mês</th>
             <th scope="col">Gestor</th>
           </tr>
         </thead>
@@ -189,43 +284,13 @@ function renderGlobal() {
       </table>
     </div>` : vazio();
 
-  // Contas cuja entrega travou: é o melhor indício de falta de saldo que
-  // existe sem o ledger, já que nenhuma API devolve saldo disponível.
-  const suspeitas = ativas
-    .map((c) => ({ conta: c, sinal: estado.sinais[c.account_id] }))
-    .filter((x) => ['provavel_sem_saldo', 'saldo_apertado'].includes(x.sinal?.sinal))
-    .sort((a, b) => SINAIS[a.sinal.sinal].peso - SINAIS[b.sinal.sinal].peso);
-
-  const alerta = suspeitas.length ? `
-    <section class="bloco">
-      <div class="alerta-saldo">
-        <div class="alerta-cabeca">
-          <span class="alerta-tag">Sinal de falta de saldo</span>
-          <span class="bloco-nota">inferido pela entrega, não confirmado pela plataforma</span>
-        </div>
-        <ul class="alerta-lista">
-          ${suspeitas.map(({ conta, sinal }) => `
-            <li>
-              <strong>${esc(conta.cliente)}</strong> · ${esc(conta.conta)} ${plat(conta.platform)}
-              <br><span class="cel-sub">entregou ${sinal.entrega_media_pct}% de ${brl(sinal.orcamento_dia)}/dia
-              — ${sinal.dias_travados} dia(s) parada nos últimos 7</span>
-            </li>`).join('')}
-        </ul>
-        <p class="alerta-rodape">
-          Entrega travada com campanha ativa e orçamento configurado quase sempre é verba acabando.
-          Também pode ser anúncio reprovado, público esgotado ou pausa manual — confirme na plataforma
-          antes de pedir aporte.
-        </p>
-      </div>
-    </section>` : '';
-
   return `
     ${kpis}
     ${alerta}
     <section class="bloco">
       <div class="bloco-cabeca">
         <h2>Todas as contas</h2>
-        <span class="bloco-nota">ordenadas por urgência · clique para abrir o cliente</span>
+        ${seletorPeriodo}
       </div>
       ${tabela}
     </section>
@@ -240,15 +305,39 @@ function renderCliente() {
   const slugs = [...new Set(estado.contas.map((c) => c.cliente_slug))].sort();
   if (!slugs.length) return vazio();
 
-  if (!estado.clienteSel || !slugs.includes(estado.clienteSel)) {
-    const urgente = ordenarPorUrgencia(estado.contas)[0];
-    estado.clienteSel = urgente?.cliente_slug ?? slugs[0];
+  // Pior status operacional por cliente — mesmo vocabulário da Carteira.
+  // Antes este seletor usava a "situação" antiga (ledger), então o mesmo
+  // cliente podia aparecer "Ok" aqui e "Provável sem saldo" na Carteira.
+  const piorPorCliente = new Map();
+  for (const c of estado.contas) {
+    if (!c.ativo) continue;
+    const op = calcularStatusOp(c);
+    const atual = piorPorCliente.get(c.cliente_slug);
+    if (!atual || (STATUS_OPERACIONAL[op]?.peso ?? 99) < (STATUS_OPERACIONAL[atual]?.peso ?? 99)) {
+      piorPorCliente.set(c.cliente_slug, op);
+    }
   }
 
-  const opcoes = ordenarPorUrgencia(estado.clientes, 'situacao_pior', 'dias_restantes_menor')
-    .map((c) => `<option value="${esc(c.cliente_slug)}"${c.cliente_slug === estado.clienteSel ? ' selected' : ''}>
-        ${esc(c.cliente)}${c.situacao_pior !== 'ok' ? ` — ${SITUACOES[c.situacao_pior]?.rotulo ?? ''}` : ''}
-      </option>`).join('');
+  if (!estado.clienteSel || !slugs.includes(estado.clienteSel)) {
+    const [urgente] = [...piorPorCliente.entries()]
+      .sort((a, b) => (STATUS_OPERACIONAL[a[1]]?.peso ?? 99) - (STATUS_OPERACIONAL[b[1]]?.peso ?? 99));
+    estado.clienteSel = urgente?.[0] ?? slugs[0];
+  }
+
+  const opcoes = [...estado.clientes]
+    .sort((a, b) => {
+      const pa = STATUS_OPERACIONAL[piorPorCliente.get(a.cliente_slug)]?.peso ?? 99;
+      const pb = STATUS_OPERACIONAL[piorPorCliente.get(b.cliente_slug)]?.peso ?? 99;
+      if (pa !== pb) return pa - pb;
+      return String(a.cliente).localeCompare(String(b.cliente), 'pt-BR');
+    })
+    .map((c) => {
+      const pior = piorPorCliente.get(c.cliente_slug);
+      const rotulo = pior && pior !== 'investindo' ? ` — ${STATUS_OPERACIONAL[pior].rotulo}` : '';
+      return `<option value="${esc(c.cliente_slug)}"${c.cliente_slug === estado.clienteSel ? ' selected' : ''}>
+        ${esc(c.cliente)}${rotulo}
+      </option>`;
+    }).join('');
 
   const contas = estado.contas.filter((c) => c.cliente_slug === estado.clienteSel);
   const resumo = estado.clientes.find((c) => c.cliente_slug === estado.clienteSel);
@@ -289,14 +378,18 @@ function renderCliente() {
       </div>
     </div>`;
 
-  const cartoes = ordenarPorUrgencia(contas).map((c) => `
-    <article class="conta${['critico', 'sem_verba'].includes(c.situacao) ? ' urgente' : ''}">
+  const cartoes = contas.map((c) => ({ ...c, statusOp: calcularStatusOp(c) }))
+    .sort((a, b) => (STATUS_OPERACIONAL[a.statusOp]?.peso ?? 99) - (STATUS_OPERACIONAL[b.statusOp]?.peso ?? 99))
+    .map((c) => {
+      const aporte = estado.ultimoAporte[c.account_id];
+      return `
+    <article class="conta${['parada', 'sem_sync', 'sem_saldo'].includes(c.statusOp) ? ' urgente' : ''}">
       <div class="conta-topo">
         <div>
           <div class="conta-nome">${esc(c.conta)}</div>
           <div style="margin-top:4px">${plat(c.platform)}</div>
         </div>
-        ${chip(c.situacao)}
+        ${chipStatusOp(c)}
       </div>
       <div class="conta-saldo${c.tem_aporte && Number(c.saldo) <= 0 ? ' zerado' : ''}">${
         c.tem_aporte ? brl(c.saldo, { centavos: true }) : '—'
@@ -316,8 +409,13 @@ function renderCliente() {
         ${c.pct_verba_mensal != null
           ? `<div class="conta-linha"><dt>Da verba mensal</dt><dd>${c.pct_verba_mensal}%</dd></div>` : ''}
         <div class="conta-linha"><dt>Total aportado</dt><dd>${brl(c.total_aportado)}</dd></div>
+        <div class="conta-linha">
+          <dt>Última recarga</dt>
+          <dd>${aporte ? `${brl(aporte.ultimo_valor)} em ${dataCurta(aporte.ultima_data)}` : 'nenhuma ainda'}</dd>
+        </div>
       </dl>
-    </article>`).join('');
+    </article>`;
+    }).join('');
 
   return `
     <div class="seletor">
@@ -784,6 +882,9 @@ function render() {
   const sel = document.getElementById('sel-cliente');
   if (sel) sel.addEventListener('change', (e) => { estado.clienteSel = e.target.value; render(); });
 
+  const selPeriodo = document.getElementById('sel-periodo');
+  if (selPeriodo) selPeriodo.addEventListener('change', (e) => { estado.periodo = e.target.value; render(); });
+
   const selInv = document.getElementById('sel-invest');
   if (selInv) selInv.addEventListener('change', (e) => {
     estado.investCliente = e.target.value || null;
@@ -800,13 +901,13 @@ function render() {
     trocarAba('investimentos');
   });
 
-  alvo.querySelectorAll('tr.clicavel').forEach((tr) => {
+  alvo.querySelectorAll('.clicavel[data-cliente]').forEach((el) => {
     const abrir = () => {
-      estado.clienteSel = tr.dataset.cliente;
+      estado.clienteSel = el.dataset.cliente;
       trocarAba('cliente');
     };
-    tr.addEventListener('click', abrir);
-    tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') abrir(); });
+    el.addEventListener('click', abrir);
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') abrir(); });
   });
 }
 
@@ -972,8 +1073,36 @@ function gerarDemo() {
     });
   }
 
-  return { contas, clientes, serie, campanhas, sinais, historico, historicoCarteira,
-           ultimoSync: new Date().toISOString() };
+  // Status operacional: agrupa o detalhe de campanha já gerado acima. A
+  // conta "Tricotá" tem orçamento configurado zero, então nasce com 1
+  // campanha pausada e vira o exemplo de "parada" no demo.
+  const statusCampanhas = {};
+  for (const c of contas) {
+    const doAcc = campanhas.filter((cp) => cp.account_id === c.account_id);
+    statusCampanhas[c.account_id] = {
+      account_id: c.account_id,
+      ultimo_dado: new Date().toISOString().slice(0, 10),
+      dias_sem_dado_novo: 0,
+      campanhas_total: doAcc.length,
+      campanhas_ativas_hoje: doAcc.filter((cp) => cp.status === 'ACTIVE').length,
+    };
+  }
+
+  // Último aporte: fictício, plausível a partir do total já aportado.
+  const ultimoAporte = {};
+  for (const c of contas) {
+    const diasAtras = 1 + Math.floor(Math.random() * 18);
+    const dt = new Date(); dt.setDate(dt.getDate() - diasAtras);
+    ultimoAporte[c.account_id] = {
+      account_id: c.account_id,
+      ultima_data: dt.toISOString().slice(0, 10),
+      ultimo_valor: Math.round(c.total_aportado * 0.4),
+      qtd_aportes: 2,
+    };
+  }
+
+  return { contas, clientes, serie, campanhas, sinais, statusCampanhas, ultimoAporte,
+           historico, historicoCarteira, ultimoSync: new Date().toISOString() };
 }
 
 iniciar();

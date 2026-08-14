@@ -1,19 +1,60 @@
 # Verba por cliente — Meta Ads + Google Ads
 
-Acompanhamento de investimento por cliente: **quem tem verba na conta, quem não tem,
-quanto tem e por quantos dias ainda dura** no ritmo atual das campanhas.
+Acompanhamento de investimento por cliente. A pergunta que o dashboard existe para
+responder é uma só: **essa conta está investindo agora, e se não está, por quê.**
 
-Três visões:
+Quatro visões:
 
 | Aba | Responde | Vem de |
 |---|---|---|
-| **Carteira** | quem precisa de aporte agora | cadastro + ledger de aportes cruzado com gasto real |
-| **Por cliente** | como está esse cliente específico | idem, recortado por cliente |
+| **Carteira** | quais contas precisam de ação agora, e quanto cada uma investiu no período | status operacional (fato) + sinal de entrega (inferência) + ledger, quando existe |
+| **Por cliente** | como está esse cliente específico, saldo e última recarga | idem, recortado por cliente |
 | **Investimentos** | onde o dinheiro está sendo aplicado, campanha a campanha | direto da plataforma de anúncio, via Windsor |
 | **Histórico** | quanto foi investido mês a mês, e o que rendeu | o acumulado que o banco guarda desde o primeiro sync |
 
 A aba Investimentos abre pela navegação (carteira inteira) ou pelo botão
 **Ver investimento completo** dentro de cada cliente, que a abre já filtrada nele.
+
+### Status operacional — um status por conta, não três colunas para cruzar
+
+A primeira versão deste dashboard tinha "situação" (baseada em ledger, quase sempre
+vazio), "sinal de entrega" (inferência) e "campanhas ativas" como colunas separadas.
+Para responder "essa conta vai parar?" era preciso cruzar as três mentalmente. Isso
+foi revisado: hoje existe **um status por conta** (`assets/calc.js:statusOperacionalDe`),
+calculado nesta ordem — fato antes de inferência:
+
+| Status | Como é decidido | É fato ou inferência? |
+|---|---|---|
+| **Inativa** | conta marcada `ativo = false` no cadastro | cadastro |
+| **Sem campanha configurada** | nenhuma campanha apareceu no relatório ainda | fato |
+| **Sem dado recente** | o Windsor não traz linha nova há 3+ dias | fato |
+| **Parada** | tem campanha cadastrada, nenhuma ativa no último dia com dado | fato |
+| **Provável sem saldo** | entrega travou (< 25% do orçamento) 2+ dos últimos 3 dias | inferência |
+| **Saldo apertado** | entrega travou 3+ dos últimos 7 dias, sem ser recente | inferência |
+| **Parte das campanhas pausada** | só algumas campanhas da conta estão ativas | fato |
+| **Investindo normal** | nenhuma das anteriores | — |
+
+A Carteira mostra a lista "Agir agora" (parada / sem dado / provável sem saldo) e
+"Fique de olho" (saldo apertado) separadas — a primeira é o que precisa de ação
+hoje, a segunda é aviso antecipado.
+
+**Isso responde "tem saldo ou não" sem exigir aporte lançado.** Nenhuma API de
+anúncio devolve saldo disponível, mas conta que para de entregar com campanha ativa
+e orçamento configurado quase sempre parou por falta de verba. É inferência, não
+confirmação — também pode ser anúncio reprovado, público esgotado ou pausa manual, e
+a interface diz isso.
+
+### Filtro de período
+
+A coluna "Investido" na Carteira e o KPI correspondente respondem a um seletor —
+7 dias, 30 dias, mês atual, mês anterior. Calculado no front a partir da série diária
+já carregada (`inv_spend_series`), sem ida extra ao banco.
+
+### Financeiro por cliente
+
+Cada cartão de conta na aba Por cliente mostra saldo (quando há ledger), total
+aportado e a **última recarga** (data + valor), vinda de `inv_ultimo_aporte`. Fica
+pronto para quando os aportes forem lançados — hoje aparece "nenhuma ainda".
 
 ### Histórico e métricas
 
@@ -83,15 +124,12 @@ orçamento. Usar só o gasto real subestima logo depois de um aumento de verba, 
 exatamente quando o saldo acaba mais rápido. O maior dos dois faz o alerta chegar antes,
 que é o comportamento útil para quem precisa pedir o aporte a tempo.
 
-### Semáforo
-
-| Situação | Regra |
-|---|---|
-| **Sem verba** | saldo ≤ 0 |
-| **Crítico** | menos de 3 dias |
-| **Atenção** | menos de 7 dias |
-| **Sem veiculação** | tem saldo, nenhuma campanha ativa consumindo |
-| **Ok** | 7 dias ou mais |
+A view `inv_account_status` ainda calcula um campo `situacao` ledger-only
+(`sem_verba` quando saldo ≤ 0, `crítico` abaixo de 3 dias, `atenção` abaixo de 7,
+etc.) — mas ele não aparece mais na interface como status principal. Virou
+detalhe interno (ex.: decidir se uma conta com ledger zerado mostra "0 dias" em
+vez de esconder atrás da média do cliente). O que o usuário vê é sempre o status
+operacional descrito acima.
 
 ---
 
@@ -163,9 +201,11 @@ O dashboard é um **link público**: qualquer pessoa com a URL vê saldo e inves
 todos os clientes. Foi uma decisão explícita.
 
 O que protege o resto: as tabelas base estão com RLS ligado e sem policy, então o
-`anon` não lê linha nenhuma delas — só as três views agregadas. A chave no
-`config.js` é a *publishable*, feita para ficar no navegador. A `service_role` só existe
-dentro da Edge Function.
+`anon` não lê linha nenhuma delas — só as views agregadas listadas nas migrations. A
+chave no `config.js` é a *publishable*, feita para ficar no navegador. Não existe
+`service_role` correndo em lugar nenhum: `inv_sync_windsor` roda como função
+`security definer` dentro do próprio Postgres, chamada pelo `pg_cron` — não há
+Edge Function nem processo externo com credencial elevada.
 
 Para fechar o acesso depois, sem mexer em código: **Vercel → Settings → Deployment
 Protection → Password Protection**.
