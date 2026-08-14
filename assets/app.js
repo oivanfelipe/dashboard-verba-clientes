@@ -97,7 +97,11 @@ function renderGlobal() {
 
   const semVerba = ativas.filter((c) => c.situacao === 'sem_verba');
   const criticas = ativas.filter((c) => ['critico', 'sem_verba'].includes(c.situacao));
-  const saldoTotal = ativas.reduce((s, c) => s + Number(c.saldo || 0), 0);
+  // Conta sem aporte lançado não entra no saldo: somar zero ali daria um
+  // total falso e faria a carteira parecer mais pobre do que é.
+  const comLedger = ativas.filter((c) => c.tem_aporte);
+  const semLedger = ativas.filter((c) => c.situacao === 'sem_ledger');
+  const saldoTotal = comLedger.reduce((s, c) => s + Number(c.saldo || 0), 0);
   const burnTotal = ativas.reduce((s, c) => s + Number(c.burn_projecao || 0), 0);
   const clientesSemVerba = new Set(semVerba.map((c) => c.cliente)).size;
 
@@ -110,13 +114,19 @@ function renderGlobal() {
       </div>
       <div class="kpi">
         <div class="kpi-rotulo">Saldo em conta</div>
-        <div class="kpi-valor">${brl(saldoTotal)}</div>
-        <div class="kpi-nota">${ativas.length} contas ativas</div>
+        <div class="kpi-valor">${comLedger.length ? brl(saldoTotal) : '—'}</div>
+        <div class="kpi-nota">${semLedger.length
+          ? `${semLedger.length} de ${ativas.length} contas sem aporte lançado`
+          : `${ativas.length} contas ativas`}</div>
       </div>
       <div class="kpi">
         <div class="kpi-rotulo">Queima por dia</div>
         <div class="kpi-valor">${brl(burnTotal)}</div>
-        <div class="kpi-nota">${burnTotal > 0 ? `carteira dura ~${Math.floor(saldoTotal / burnTotal)} dias` : 'nenhuma campanha ativa'}</div>
+        <div class="kpi-nota">${burnTotal > 0
+          ? (comLedger.length
+              ? `carteira dura ~${Math.floor(saldoTotal / burnTotal)} dias`
+              : 'lance os aportes para projetar a duração')
+          : 'nenhuma campanha ativa'}</div>
       </div>
       <div class="kpi${criticas.length ? ' destaque' : ''}">
         <div class="kpi-rotulo">Precisa de aporte</div>
@@ -134,7 +144,7 @@ function renderGlobal() {
         </td>
         <td>${plat(c.platform)}</td>
         <td>${chip(c.situacao)}</td>
-        <td class="num">${brl(c.saldo)}</td>
+        <td class="num">${c.tem_aporte ? brl(c.saldo) : '<span class="cel-sub">—</span>'}</td>
         <td class="num">${brl(c.burn_projecao)}</td>
         <td class="num">${barraDias(c.dias_restantes, c.situacao)}</td>
         <td class="num">${brl(c.gasto_mes_atual)}</td>
@@ -239,9 +249,13 @@ function renderCliente() {
         </div>
         ${chip(c.situacao)}
       </div>
-      <div class="conta-saldo${Number(c.saldo) <= 0 ? ' zerado' : ''}">${brl(c.saldo, { centavos: true })}</div>
+      <div class="conta-saldo${c.tem_aporte && Number(c.saldo) <= 0 ? ' zerado' : ''}">${
+        c.tem_aporte ? brl(c.saldo, { centavos: true }) : '—'
+      }</div>
       <div class="cel-sub" style="margin-bottom:10px">
-        ${c.balance_source === 'api' ? 'saldo lido da plataforma' : 'saldo = aportes − gasto'}
+        ${!c.tem_aporte ? 'nenhum aporte lançado ainda'
+          : c.balance_source === 'api' ? 'saldo lido da plataforma'
+          : 'saldo = aportes − gasto'}
       </div>
       <dl>
         <div class="conta-linha"><dt>Dias restantes</dt><dd>${dias(c.dias_restantes)}</dd></div>
@@ -608,7 +622,7 @@ function gerarDemo() {
       const conta = {
         account_id: id, client_id: slug, cliente: nome, cliente_slug: slug, gestor,
         platform: pl, conta: cNome, currency: 'BRL', billing_model: 'prepago',
-        balance_source: 'ledger', ativo: true,
+        balance_source: 'ledger', ativo: true, tem_aporte: true,
         campanhas_ativas: burnCfg > 0 ? 2 + (n % 3) : 0,
         burn_configurado: burnCfg, burn_real_7d: burnReal, burn_projecao: burn,
         total_aportado: saldo + gastoMes * 2, total_gasto_ledger: gastoMes * 2,

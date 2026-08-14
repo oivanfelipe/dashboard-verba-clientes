@@ -6,13 +6,16 @@
    ========================================================= */
 
 export const SITUACOES = {
-  sem_verba:      { rotulo: 'Sem verba',      peso: 0 },
-  critico:        { rotulo: 'Crítico',        peso: 1 },
-  atencao:        { rotulo: 'Atenção',        peso: 2 },
-  sem_veiculacao: { rotulo: 'Sem veiculação', peso: 3 },
-  ok:             { rotulo: 'Ok',             peso: 4 },
-  sem_dado:       { rotulo: 'Sem dado',       peso: 5 },
-  inativo:        { rotulo: 'Inativa',        peso: 6 },
+  sem_verba:      { rotulo: 'Sem verba',          peso: 0 },
+  critico:        { rotulo: 'Crítico',            peso: 1 },
+  atencao:        { rotulo: 'Atenção',            peso: 2 },
+  sem_veiculacao: { rotulo: 'Sem veiculação',     peso: 3 },
+  ok:             { rotulo: 'Ok',                 peso: 4 },
+  // Ledger ainda não iniciado: sem aporte lançado não dá para falar de saldo.
+  // Não é alarme — é cadastro pendente, e por isso fica no fim da ordenação.
+  sem_ledger:     { rotulo: 'Aporte não lançado', peso: 5 },
+  sem_dado:       { rotulo: 'Sem dado',           peso: 6 },
+  inativo:        { rotulo: 'Inativa',            peso: 7 },
 };
 
 export const PLATAFORMAS = {

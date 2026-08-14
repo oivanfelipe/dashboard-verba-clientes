@@ -132,6 +132,7 @@ tbody tr.clicavel:hover { background: var(--superficie-2); }
 .chip-sem_veiculacao { color: var(--neutro);  background: var(--neutro-tint); }
 .chip-inativo        { color: var(--inativo); background: var(--inativo-tint); }
 .chip-sem_dado       { color: var(--inativo); background: var(--inativo-tint); }
+.chip-sem_ledger     { color: var(--atencao); background: var(--atencao-tint); }
 
 /* ---------- Barra de dias restantes ---------- */
 
