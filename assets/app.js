@@ -343,12 +343,22 @@ function renderCliente() {
   const resumo = estado.clientes.find((c) => c.cliente_slug === estado.clienteSel);
   const serie = estado.serie.filter((s) => contas.some((c) => c.account_id === s.account_id));
 
+  // saldo_total vem NULL do SQL quando nenhuma conta do cliente tem aporte
+  // lançado (a soma é filtrada por tem_aporte). Number(null) é 0, então sem
+  // este check o card mostraria "R$ 0" em vermelho — alarme falso de conta
+  // zerada onde na verdade ninguém lançou aporte ainda.
+  const temAporte = contas.some((c) => c.ativo && c.tem_aporte);
+
   const kpis = `
     <div class="kpis">
       <div class="kpi">
         <div class="kpi-rotulo">Saldo do cliente</div>
-        <div class="kpi-valor${Number(resumo?.saldo_total) <= 0 ? ' alerta' : ''}">${brl(resumo?.saldo_total)}</div>
-        <div class="kpi-nota">${resumo?.contas_ativas ?? 0} conta(s) ativa(s)</div>
+        <div class="kpi-valor${temAporte && Number(resumo?.saldo_total) <= 0 ? ' alerta' : ''}">${
+          temAporte ? brl(resumo?.saldo_total) : '—'
+        }</div>
+        <div class="kpi-nota">${temAporte
+          ? `${resumo?.contas_ativas ?? 0} conta(s) ativa(s)`
+          : 'nenhum aporte lançado ainda'}</div>
       </div>
       <div class="kpi">
         <div class="kpi-rotulo">Queima por dia</div>
