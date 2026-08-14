@@ -258,3 +258,22 @@ select:focus-visible, input:focus-visible { outline: 2px solid var(--marca); out
   .abas, .seletor { display: none; }
   .kpi, .tabela-caixa, .gr-caixa, .conta { break-inside: avoid; }
 }
+
+/* ---------- Alerta de sinal de saldo ---------- */
+/* Inferência, não fato: a borda é vermelha para dar peso, mas o rodapé
+   diz explicitamente que a plataforma não confirmou. */
+.alerta-saldo {
+  border: 1.5px solid var(--marca); border-radius: var(--raio);
+  padding: 16px 18px; background: var(--critico-tint);
+}
+.alerta-cabeca { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.alerta-tag {
+  font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  color: #fff; background: var(--marca); padding: 3px 9px; border-radius: 4px;
+}
+.alerta-lista { margin: 0; padding-left: 18px; display: grid; gap: 9px; font-size: 13.5px; }
+.alerta-lista li { line-height: 1.45; }
+.alerta-rodape {
+  margin: 12px 0 0; font-size: 12.5px; color: var(--tinta-2);
+  border-top: 1px solid rgba(192, 0, 0, .18); padding-top: 10px;
+}

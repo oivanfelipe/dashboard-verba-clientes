@@ -18,6 +18,22 @@ export const SITUACOES = {
   inativo:        { rotulo: 'Inativa',            peso: 7 },
 };
 
+/**
+ * Sinal de saldo inferido pela entrega.
+ *
+ * Nenhuma API de anúncio devolve saldo disponível. Mas conta que para de
+ * entregar com campanha ativa e orçamento configurado quase sempre parou
+ * por falta de verba. É INFERÊNCIA, não fato — a interface precisa dizer
+ * isso, porque a causa também pode ser reprovação de anúncio, audiência
+ * esgotada ou pausa manual.
+ */
+export const SINAIS = {
+  provavel_sem_saldo: { rotulo: 'Provável sem saldo', peso: 0, chip: 'critico' },
+  saldo_apertado:     { rotulo: 'Saldo apertado',     peso: 1, chip: 'atencao' },
+  oscilando:          { rotulo: 'Oscilando',          peso: 2, chip: 'sem_veiculacao' },
+  entregando:         { rotulo: 'Entregando',         peso: 3, chip: 'ok' },
+};
+
 export const PLATAFORMAS = {
   meta:   { rotulo: 'Meta Ads',   cor: '#1f5fa8' },
   google: { rotulo: 'Google Ads', cor: '#c4620a' },

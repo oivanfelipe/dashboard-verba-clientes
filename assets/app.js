@@ -4,7 +4,7 @@
    ========================================================= */
 
 import {
-  SITUACOES, PLATAFORMAS, brl, dias, dataCurta, dataHora,
+  SITUACOES, SINAIS, PLATAFORMAS, brl, dias, dataCurta, dataHora,
   larguraDias, ordenarPorUrgencia, situacaoDe, burnProjecao, diasRestantes,
 } from './calc.js';
 
@@ -18,6 +18,7 @@ const estado = {
   clientes: [],
   serie: [],
   campanhas: [],
+  sinais: {},
   aba: 'global',
   clienteSel: null,
   investCliente: null, // null = carteira inteira na aba Investimentos
@@ -47,17 +48,19 @@ async function carregar() {
     Object.assign(estado, d);
     return;
   }
-  const [contas, clientes, serie, campanhas, sync] = await Promise.all([
+  const [contas, clientes, serie, campanhas, sinais, sync] = await Promise.all([
     buscar('inv_account_status'),
     buscar('inv_client_overview'),
     buscar('inv_spend_series', '&order=data.asc'),
     buscar('inv_campanhas_resumo', '&order=gasto_30d.desc').catch(() => []),
+    buscar('inv_sinal_saldo').catch(() => []),
     buscar('inv_sync_status').catch(() => []),
   ]);
   estado.contas = contas;
   estado.clientes = clientes;
   estado.serie = serie;
   estado.campanhas = campanhas;
+  estado.sinais = Object.fromEntries(sinais.map((s) => [s.account_id, s]));
   estado.ultimoSync = sync?.[0]?.ultimo_sync_ok ?? null;
 }
 
@@ -87,6 +90,13 @@ const barraDias = (d, sit) => `
 
 const plat = (p) =>
   `<span class="plat plat-${esc(p)}">${esc(PLATAFORMAS[p]?.rotulo ?? p)}</span>`;
+
+const chipSinal = (accountId) => {
+  const s = estado.sinais[accountId];
+  const def = s && SINAIS[s.sinal];
+  if (!def) return '<span class="cel-sub">—</span>';
+  return `<span class="chip chip-${def.chip}" title="entregou em média ${s.entrega_media_pct}% do orçamento nos últimos 7 dias">${esc(def.rotulo)}</span>`;
+};
 
 /* =========================================================
    Visão global
@@ -145,6 +155,7 @@ function renderGlobal() {
         <td>${plat(c.platform)}</td>
         <td>${chip(c.situacao)}</td>
         <td class="num">${c.tem_aporte ? brl(c.saldo) : '<span class="cel-sub">—</span>'}</td>
+        <td>${chipSinal(c.account_id)}</td>
         <td class="num">${brl(c.burn_projecao)}</td>
         <td class="num">${barraDias(c.dias_restantes, c.situacao)}</td>
         <td class="num">${brl(c.gasto_mes_atual)}</td>
@@ -161,6 +172,7 @@ function renderGlobal() {
             <th scope="col">Plataforma</th>
             <th scope="col">Situação</th>
             <th scope="col" class="num">Saldo</th>
+            <th scope="col">Sinal de entrega</th>
             <th scope="col" class="num">Queima/dia</th>
             <th scope="col" class="num">Dias restantes</th>
             <th scope="col" class="num">Gasto no mês</th>
@@ -171,8 +183,39 @@ function renderGlobal() {
       </table>
     </div>` : vazio();
 
+  // Contas cuja entrega travou: é o melhor indício de falta de saldo que
+  // existe sem o ledger, já que nenhuma API devolve saldo disponível.
+  const suspeitas = ativas
+    .map((c) => ({ conta: c, sinal: estado.sinais[c.account_id] }))
+    .filter((x) => ['provavel_sem_saldo', 'saldo_apertado'].includes(x.sinal?.sinal))
+    .sort((a, b) => SINAIS[a.sinal.sinal].peso - SINAIS[b.sinal.sinal].peso);
+
+  const alerta = suspeitas.length ? `
+    <section class="bloco">
+      <div class="alerta-saldo">
+        <div class="alerta-cabeca">
+          <span class="alerta-tag">Sinal de falta de saldo</span>
+          <span class="bloco-nota">inferido pela entrega, não confirmado pela plataforma</span>
+        </div>
+        <ul class="alerta-lista">
+          ${suspeitas.map(({ conta, sinal }) => `
+            <li>
+              <strong>${esc(conta.cliente)}</strong> · ${esc(conta.conta)} ${plat(conta.platform)}
+              <br><span class="cel-sub">entregou ${sinal.entrega_media_pct}% de ${brl(sinal.orcamento_dia)}/dia
+              — ${sinal.dias_travados} dia(s) parada nos últimos 7</span>
+            </li>`).join('')}
+        </ul>
+        <p class="alerta-rodape">
+          Entrega travada com campanha ativa e orçamento configurado quase sempre é verba acabando.
+          Também pode ser anúncio reprovado, público esgotado ou pausa manual — confirme na plataforma
+          antes de pedir aporte.
+        </p>
+      </div>
+    </section>` : '';
+
   return `
     ${kpis}
+    ${alerta}
     <section class="bloco">
       <div class="bloco-cabeca">
         <h2>Todas as contas</h2>
@@ -681,7 +724,25 @@ function gerarDemo() {
     }
   }
 
-  return { contas, clientes, serie, campanhas, ultimoSync: new Date().toISOString() };
+  // Sinais de entrega: as contas com pouco saldo entregam mal, que é
+  // exatamente a correlação que o sinal existe para capturar.
+  const sinais = {};
+  for (const c of contas) {
+    const d = c.dias_restantes;
+    const sinal = c.burn_configurado === 0 ? 'entregando'
+      : d === null || d <= 1 ? 'provavel_sem_saldo'
+      : d <= 5 ? 'saldo_apertado'
+      : d <= 15 ? 'oscilando' : 'entregando';
+    sinais[c.account_id] = {
+      account_id: c.account_id, sinal,
+      orcamento_dia: c.burn_configurado,
+      dias_travados: sinal === 'provavel_sem_saldo' ? 5 : sinal === 'saldo_apertado' ? 3 : 1,
+      entrega_media_pct: sinal === 'provavel_sem_saldo' ? 11
+        : sinal === 'saldo_apertado' ? 48 : 96,
+    };
+  }
+
+  return { contas, clientes, serie, campanhas, sinais, ultimoSync: new Date().toISOString() };
 }
 
 iniciar();
