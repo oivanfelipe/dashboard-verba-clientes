@@ -3,7 +3,16 @@
 Acompanhamento de investimento por cliente: **quem tem verba na conta, quem não tem,
 quanto tem e por quantos dias ainda dura** no ritmo atual das campanhas.
 
-Duas visões: a carteira inteira e o cliente individual.
+Três visões:
+
+| Aba | Responde | Vem de |
+|---|---|---|
+| **Carteira** | quem precisa de aporte agora | cadastro + ledger de aportes cruzado com gasto real |
+| **Por cliente** | como está esse cliente específico | idem, recortado por cliente |
+| **Investimentos** | onde o dinheiro está sendo aplicado, campanha a campanha | direto da plataforma de anúncio, via Windsor |
+
+A aba Investimentos abre pela navegação (carteira inteira) ou pelo botão
+**Ver investimento completo** dentro de cada cliente, que a abre já filtrada nele.
 
 ---
 
