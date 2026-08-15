@@ -7,7 +7,7 @@ import {
   SITUACOES, PLATAFORMAS, brl, dias, dataCurta, dataHora,
   larguraDias, situacaoDe, burnProjecao, diasRestantes,
   STATUS_OPERACIONAL, statusOperacionalDe, ordenarPorStatusOperacional,
-  PERIODOS, faixaPeriodo,
+  CLASSIFICACOES_SALDO, classificacaoSaldoDe, ordenarPorSaldo, PERIODOS, faixaPeriodo,
 } from './calc.js';
 
 import { CONFIG } from './config.js';
@@ -152,6 +152,21 @@ const chipStatusOp = (conta) => {
   return `<span class="chip chip-${def.chip}" title="${esc(motivoStatusOp(conta, key))}">${esc(def.rotulo)}</span>`;
 };
 
+const chipSaldo = (conta) => {
+  const def = CLASSIFICACOES_SALDO[conta.classificacaoSaldo];
+  if (!def) return '<span class="cel-sub">—</span>';
+  return `<span class="chip chip-${def.chip}">${esc(def.rotulo)}</span>`;
+};
+
+const motivoSaldoConfirmado = (conta) => {
+  const autonomia = conta.dias_restantes ?? (
+    Number(conta.saldo) <= 0 && Number(conta.burn_projecao) > 0 ? 0 : null
+  );
+  return autonomia === null
+    ? `saldo confirmado de ${brl(conta.saldo)} · sem queima projetada`
+    : `saldo confirmado de ${brl(conta.saldo)} · ${dias(autonomia)} de autonomia`;
+};
+
 /* ---------- Investimento por período (filtro da Carteira) ---------- */
 
 function mapaInvestimentoPeriodo(periodo) {
@@ -169,19 +184,31 @@ function mapaInvestimentoPeriodo(periodo) {
    ========================================================= */
 
 function renderGlobal() {
-  // Um status por conta, calculado uma vez e carregado na própria linha —
-  // evita recalcular em cada função de apoio (ordenar, filtrar, exibir).
-  const contas = estado.contas.map((c) => ({ ...c, statusOp: calcularStatusOp(c) }));
+  // Saldo confirmado é a primeira camada da Carteira. O status operacional
+  // permanece como contexto: sinal de entrega não transforma ausência de
+  // informação financeira em saldo zerado.
+  const contas = estado.contas.map((c) => ({
+    ...c,
+    statusOp: calcularStatusOp(c),
+    classificacaoSaldo: classificacaoSaldoDe({
+      balanceSource: c.balance_source,
+      temAporte: c.tem_aporte,
+      saldo: c.saldo,
+      burn: c.burn_projecao,
+      diasRestantes: c.dias_restantes,
+    }),
+  }));
   const ativas = contas.filter((c) => c.ativo);
 
   const investPorConta = mapaInvestimentoPeriodo(estado.periodo);
   const investTotalPeriodo = ativas.reduce((s, c) => s + (investPorConta.get(c.account_id) || 0), 0);
 
-  // Ação necessária agora: a conta parou ou está prestes a parar.
-  const urgentes = ativas.filter((c) => ['parada', 'sem_sync', 'sem_saldo'].includes(c.statusOp));
+  const abastecerAgora = ativas.filter((c) => c.classificacaoSaldo === 'abastecer_agora');
+  const programarAporte = ativas.filter((c) => c.classificacaoSaldo === 'programar_aporte');
+  const saldoControlado = ativas.filter((c) => c.classificacaoSaldo === 'saldo_controlado');
+  const saldoNaoInformado = ativas.filter((c) => c.classificacaoSaldo === 'saldo_nao_informado');
+  const riscosUrgentes = ativas.filter((c) => ['parada', 'sem_sync', 'sem_saldo'].includes(c.statusOp));
   const emObservacao = ativas.filter((c) => c.statusOp === 'saldo_apertado');
-  const rodando = ativas.filter((c) => ['investindo', 'parcial'].includes(c.statusOp));
-  const clientesUrgentes = new Set(urgentes.map((c) => c.cliente)).size;
 
   const seletorPeriodo = `
     <div class="seletor-periodo">
@@ -194,29 +221,29 @@ function renderGlobal() {
 
   const kpis = `
     <div class="kpis">
-      <div class="kpi${urgentes.length ? ' destaque' : ''}">
-        <div class="kpi-rotulo">Contas em risco agora</div>
-        <div class="kpi-valor${urgentes.length ? ' alerta' : ''}">${urgentes.length}</div>
-        <div class="kpi-nota">${clientesUrgentes} cliente${clientesUrgentes === 1 ? '' : 's'} afetado${clientesUrgentes === 1 ? '' : 's'}</div>
+      <div class="kpi${abastecerAgora.length ? ' destaque' : ''}">
+        <div class="kpi-rotulo">Abastecer agora</div>
+        <div class="kpi-valor${abastecerAgora.length ? ' alerta' : ''}">${abastecerAgora.length}</div>
+        <div class="kpi-nota">saldo confirmado · até 2 dias</div>
       </div>
       <div class="kpi">
-        <div class="kpi-rotulo">Investido — ${esc(PERIODOS[estado.periodo].rotulo)}</div>
-        <div class="kpi-valor">${brl(investTotalPeriodo)}</div>
-        <div class="kpi-nota">${ativas.length} contas ativas</div>
+        <div class="kpi-rotulo">Programar aporte</div>
+        <div class="kpi-valor">${programarAporte.length}</div>
+        <div class="kpi-nota">saldo confirmado · 3–7 dias</div>
       </div>
       <div class="kpi">
-        <div class="kpi-rotulo">Contas investindo agora</div>
-        <div class="kpi-valor">${rodando.length}<span style="font-size:16px;color:var(--tinta-3)"> de ${ativas.length}</span></div>
-        <div class="kpi-nota">${ativas.length - rodando.length} sem campanha rodando</div>
+        <div class="kpi-rotulo">Saldo controlado</div>
+        <div class="kpi-valor">${saldoControlado.length}</div>
+        <div class="kpi-nota">saldo confirmado</div>
       </div>
-      <div class="kpi${emObservacao.length ? ' destaque' : ''}">
-        <div class="kpi-rotulo">Saldo apertado</div>
-        <div class="kpi-valor">${emObservacao.length}</div>
-        <div class="kpi-nota">tende a virar risco nos próximos dias</div>
+      <div class="kpi${saldoNaoInformado.length ? ' destaque' : ''}">
+        <div class="kpi-rotulo">Saldo não informado</div>
+        <div class="kpi-valor${saldoNaoInformado.length ? ' alerta' : ''}">${saldoNaoInformado.length}</div>
+        <div class="kpi-nota">sem fonte confiável de saldo</div>
       </div>
     </div>`;
 
-  const listaUrgente = (lista, titulo, tag, nota) => !lista.length ? '' : `
+  const listaUrgente = (lista, titulo, tag, nota, descricao = (c) => motivoStatusOp(c, c.statusOp)) => !lista.length ? '' : `
     <div class="alerta-grupo">
       <div class="alerta-cabeca">
         <span class="alerta-tag alerta-tag-${tag}">${esc(titulo)}</span>
@@ -226,31 +253,50 @@ function renderGlobal() {
         ${lista.map((c) => `
           <li class="clicavel" data-cliente="${esc(c.cliente_slug)}" tabindex="0">
             <strong>${esc(c.cliente)}</strong> · ${esc(c.conta)} ${plat(c.platform)}
-            <br><span class="cel-sub">${esc(motivoStatusOp(c, c.statusOp))}</span>
+            <br><span class="cel-sub">${esc(descricao(c))}</span>
           </li>`).join('')}
       </ul>
     </div>`;
 
-  const alerta = (urgentes.length || emObservacao.length) ? `
+  const alerta = ativas.length ? `
     <section class="bloco">
       <div class="alerta-saldo">
         ${listaUrgente(
-          ordenarPorStatusOperacional(urgentes), 'Agir agora', 'critico',
-          'parada, sem sincronizar ou provável sem saldo — clique para abrir o cliente',
+          ordenarPorSaldo(abastecerAgora), 'Abastecer agora', 'critico',
+          'saldo confirmado com até 2 dias de autonomia — clique para abrir o cliente',
+          motivoSaldoConfirmado,
         )}
         ${listaUrgente(
-          ordenarPorStatusOperacional(emObservacao), 'Fique de olho', 'atencao',
-          'entrega abaixo do orçamento nos últimos dias',
+          ordenarPorSaldo(programarAporte), 'Programar aporte', 'atencao',
+          'saldo confirmado com 3 a 7 dias de autonomia',
+          motivoSaldoConfirmado,
+        )}
+        ${listaUrgente(
+          ordenarPorSaldo(saldoControlado), 'Saldo controlado', 'ok',
+          'saldo confirmado fora da janela de aporte',
+          motivoSaldoConfirmado,
+        )}
+        ${listaUrgente(
+          ordenarPorSaldo(saldoNaoInformado), 'Saldo não informado', 'neutro',
+          'não há saldo confirmado no ledger ou em fonte de API',
+        )}
+        ${listaUrgente(
+          ordenarPorStatusOperacional(riscosUrgentes), 'Risco operacional', 'critico',
+          'parada, sem sincronizar ou entrega com risco — não confirma saldo',
+        )}
+        ${listaUrgente(
+          ordenarPorStatusOperacional(emObservacao), 'Acompanhar entrega', 'atencao',
+          'entrega abaixo do orçamento nos últimos dias — não confirma saldo',
         )}
         <p class="alerta-rodape">
-          "Provável sem saldo" e "Saldo apertado" são inferidos pela entrega das campanhas, não
-          confirmados pela plataforma — também podem ser anúncio reprovado, público esgotado ou
-          pausa manual. "Parada" e "Sem dado recente" são fatos: vêm direto do status da campanha.
+          “Provável sem saldo” e “Saldo apertado” são riscos inferidos pela entrega das campanhas,
+          nunca confirmação de saldo zerado. Eles também podem indicar anúncio reprovado, público
+          esgotado ou pausa manual. “Parada” e “Sem dado recente” são fatos operacionais.
         </p>
       </div>
     </section>` : '';
 
-  const linhas = ordenarPorStatusOperacional(contas)
+  const linhas = ordenarPorSaldo(contas)
     .map((c) => `
       <tr class="clicavel" data-cliente="${esc(c.cliente_slug)}" tabindex="0">
         <td>
@@ -258,8 +304,9 @@ function renderGlobal() {
           <div class="cel-sub">${esc(c.conta)}</div>
         </td>
         <td>${plat(c.platform)}</td>
+        <td>${chipSaldo(c)}</td>
         <td>${chipStatusOp(c)}</td>
-        <td class="num">${c.tem_aporte ? brl(c.saldo) : '<span class="cel-sub">—</span>'}</td>
+        <td class="num">${c.classificacaoSaldo !== 'saldo_nao_informado' ? brl(c.saldo) : '<span class="cel-sub">—</span>'}</td>
         <td class="num">${brl(investPorConta.get(c.account_id) || 0)}</td>
         <td class="num">${barraDias(c.dias_restantes, c.statusOp)}</td>
         <td class="cel-sub">${esc(c.gestor ?? '—')}</td>
@@ -273,6 +320,7 @@ function renderGlobal() {
           <tr>
             <th scope="col">Cliente / conta</th>
             <th scope="col">Plataforma</th>
+            <th scope="col">Saldo confirmado</th>
             <th scope="col">Status</th>
             <th scope="col" class="num">Saldo</th>
             <th scope="col" class="num">Investido — ${esc(PERIODOS[estado.periodo].rotulo)}</th>

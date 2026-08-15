@@ -1,13 +1,13 @@
 # Verba por cliente — Meta Ads + Google Ads
 
-Acompanhamento de investimento por cliente. A pergunta que o dashboard existe para
-responder é uma só: **essa conta está investindo agora, e se não está, por quê.**
+Acompanhamento de investimento por cliente. A primeira pergunta da Carteira é:
+**qual conta tem saldo confirmado e quando ela precisa de aporte?**
 
 Quatro visões:
 
 | Aba | Responde | Vem de |
 |---|---|---|
-| **Carteira** | quais contas precisam de ação agora, e quanto cada uma investiu no período | status operacional (fato) + sinal de entrega (inferência) + ledger, quando existe |
+| **Carteira** | qual conta tem saldo confirmado e quando precisa de aporte | saldo, queima projetada e dias restantes; risco operacional aparece separadamente |
 | **Por cliente** | como está esse cliente específico, saldo e última recarga | idem, recortado por cliente |
 | **Investimentos** | onde o dinheiro está sendo aplicado, campanha a campanha | direto da plataforma de anúncio, via Windsor |
 | **Histórico** | quanto foi investido mês a mês, e o que rendeu | o acumulado que o banco guarda desde o primeiro sync |
@@ -34,15 +34,16 @@ calculado nesta ordem — fato antes de inferência:
 | **Parte das campanhas pausada** | só algumas campanhas da conta estão ativas | fato |
 | **Investindo normal** | nenhuma das anteriores | — |
 
-A Carteira mostra a lista "Agir agora" (parada / sem dado / provável sem saldo) e
-"Fique de olho" (saldo apertado) separadas — a primeira é o que precisa de ação
-hoje, a segunda é aviso antecipado.
+A Carteira classifica cada conta ativa por saldo confirmado, nesta ordem:
+**Abastecer agora** (até 2 dias de autonomia), **Programar aporte** (3 a 7 dias),
+**Saldo controlado** (saldo conhecido fora dessas faixas) e **Saldo não informado**
+(não há fonte confiável). O cálculo usa `saldo`, `burn_projecao` e
+`dias_restantes`; gasto acumulado não é tratado como saldo.
 
-**Isso responde "tem saldo ou não" sem exigir aporte lançado.** Nenhuma API de
-anúncio devolve saldo disponível, mas conta que para de entregar com campanha ativa
-e orçamento configurado quase sempre parou por falta de verba. É inferência, não
-confirmação — também pode ser anúncio reprovado, público esgotado ou pausa manual, e
-a interface diz isso.
+“Provável sem saldo” e “Saldo apertado” continuam na Carteira como **riscos
+operacionais inferidos pela entrega**, separados da classificação de saldo. Eles não
+confirmam saldo zerado: também podem indicar anúncio reprovado, público esgotado ou
+pausa manual.
 
 ### Filtro de período
 

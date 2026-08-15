@@ -64,6 +64,49 @@ export const STATUS_OPERACIONAL = {
   inativa:       { rotulo: 'Inativa',                         peso: 7, chip: 'inativo' },
 };
 
+// A Carteira responde primeiro à pergunta financeira: existe saldo confiável
+// e qual é a autonomia? Status operacional e sinal de entrega continuam em
+// outra camada porque não confirmam saldo.
+export const CLASSIFICACOES_SALDO = {
+  abastecer_agora:   { rotulo: 'Abastecer agora', peso: 0, chip: 'critico' },
+  programar_aporte:  { rotulo: 'Programar aporte', peso: 1, chip: 'atencao' },
+  saldo_controlado:  { rotulo: 'Saldo controlado', peso: 2, chip: 'ok' },
+  saldo_nao_informado: { rotulo: 'Saldo não informado', peso: 3, chip: 'sem_veiculacao' },
+};
+
+/**
+ * Classifica a prioridade de saldo sem usar gasto acumulado nem entrega.
+ *
+ * Saldo é confiável quando veio diretamente de uma API ou quando o ledger
+ * possui ao menos um aporte. Sem isso, o zero calculado pelo ledger significa
+ * apenas que ainda não há base para afirmar saldo — não que a conta zerou.
+ */
+export function classificacaoSaldoDe({ balanceSource = 'ledger', temAporte = false, saldo, burn, diasRestantes }) {
+  const saldoConhecido = Number.isFinite(Number(saldo)) && saldo !== null && saldo !== undefined
+    && (balanceSource === 'api' || temAporte);
+  if (!saldoConhecido) return 'saldo_nao_informado';
+
+  const dias = Number.isFinite(Number(diasRestantes)) && diasRestantes !== null && diasRestantes !== undefined
+    ? Number(diasRestantes)
+    : (Number(saldo) <= 0 && Number(burn) > 0 ? 0 : null);
+
+  if (dias !== null && dias <= 2) return 'abastecer_agora';
+  if (dias !== null && dias <= 7) return 'programar_aporte';
+  return 'saldo_controlado';
+}
+
+export function ordenarPorSaldo(linhas) {
+  return [...linhas].sort((a, b) => {
+    const pa = CLASSIFICACOES_SALDO[a.classificacaoSaldo]?.peso ?? 99;
+    const pb = CLASSIFICACOES_SALDO[b.classificacaoSaldo]?.peso ?? 99;
+    if (pa !== pb) return pa - pb;
+    const da = a.dias_restantes ?? Infinity;
+    const db = b.dias_restantes ?? Infinity;
+    if (da !== db) return da - db;
+    return String(a.cliente || '').localeCompare(String(b.cliente || ''), 'pt-BR');
+  });
+}
+
 /**
  * @param {object} p
  * @param {boolean} p.ativo
